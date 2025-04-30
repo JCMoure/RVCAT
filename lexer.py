@@ -1,5 +1,4 @@
 from enum import Enum, auto
-#import re
 
 class TokenType(Enum):
     LF = auto()
