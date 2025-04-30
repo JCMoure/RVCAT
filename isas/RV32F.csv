@@ -1,0 +1,28 @@
+mnemonic,format,type,description,action
+FLW,        I,  MEM.LOAD.SP,     Load SP FP value,                    {rd} <-- mem({rs1} + {imm})[31:0]
+FSW,        S,  MEM.STR.SP,      Store SP FP value,                   mem({rs1} + {imm}) <-- {rs2}[31:0]
+FADD.S,     R,  FLOAT.ADD.SP,    SP FP addition,                      {rd} <-- {rs1} + {rs2}
+FSUB.S,     R,  FLOAT.ADD.SP,    SP FP substraction,                  {rd} <-- {rs1} - {rs2} 
+FMUL.S,     R,  FLOAT.MUL.SP,    SP FP multiplication,                {rd} <-- {rs1} x {rs2} 
+FDIV.S,     R,  FLOAT.DIV.SP,    SP FP division,                      {rd} <-- {rs1} / {rs2} 
+FSQRT.S,    R,  FLOAT.SQRT.SP,   SP FP square root,                   {rd} <-- sqrt({rs1})
+FSGNJ.S,    R,  FLOAT.ADD.SP,    , 
+FSGNJN.S,   R,  FLOAT.ADD.SP,    , 
+FSGNJX.S,   R,  FLOAT.ADD.SP,    , 
+FMIN.S,     R,  FLOAT.ADD.SP,    SP FP minimum,                       {rd} <-- min({rs1};{rs2})
+FMAX.S,     R,  FLOAT.ADD.SP,    SP FP maximum,                       {rd} <-- max({rs1};{rs2})
+FCVT.W.S,   R,  FLOAT.ADD.SP,    , 
+FCVT.WU.S,  R,  FLOAT.ADD.SP,    , 
+FMV.X.W,    R,  FLOAT.ADD.SP,    , 
+FEQ.S,      R,  FLOAT.ADD.SP,    , 
+FLT.S,      R,  FLOAT.ADD.SP,    , 
+FLE.S,      R,  FLOAT.ADD.SP,    , 
+FCLASS.S,   R,  FLOAT.ADD.SP,    , 
+FCVT.S.W,   R,  FLOAT.ADD.SP,    , 
+FCVT.S.WU,  R,  FLOAT.ADD.SP,    , 
+FMV.W.X,    R,  FLOAT.ADD.SP,    , 
+FMADD.S,    R4, FLOAT.FMA.SP,    SP FP fused multiply addition,       {rd} <-- {rs1} x {rs2} + {rs3}
+FMSUB.S,    R4, FLOAT.FMA.SP,    SP FP fused multiply subtract,       {rd} <-- {rs1} x {rs2} - {rs3}
+FNMADD.S,   R4, FLOAT.FMA.SP,    SP FP fused neg. multiply addition,  {rd} <-- -{rs1} x {rs2} + {rs3}
+FNMSUB.S,   R4, FLOAT.FMA.SP,    SP FP fused neg. multiply substract, {rd} <-- -{rs1} x {rs2} - {rs3}
+

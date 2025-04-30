@@ -1,0 +1,38 @@
+mnemonic,format,type,description,action
+LUI,    U,  INT.ARITH,    Load Upper Immediate,             {rd} <-- {imm}
+AUIPC,  U,  INT.ARITH,    Add Upper Immediate to PC,        {rd} <-- pc + {imm}
+ADDI,   I,  INT.ARITH,    ADD Immediate,                    {rd} <-- {rs1} + {imm}
+ADD,    R,  INT.ARITH,    ADDition,                         {rd} <-- {rs1} + {rs2}
+SUB,    R,  INT.ARITH,    SUBtraction,                      {rd} <-- {rs1} - {rs2}
+JAL,    J,  BRANCH.JUMP,  Jump And Link,                    {rd} <-- pc + 4; pc <-- pc + {imm}
+JALR,   I,  BRANCH.JUMP,  Jump And Link Register,           {rd} <-- pc + 4; pc <-- {rs1} + {imm}
+BEQ,    B,  BRANCH,       Branch Equal,                     pc <-- pc + {imm} if {rs1} == {rs2}
+BNE,    B,  BRANCH,       Branch Not Equal,                 pc <-- pc + {imm} if {rs1} != {rs2}
+BLT,    B,  BRANCH,       Branch Less Than,                 pc <-- pc + {imm} if {rs1} < {rs2}
+BGE,    B,  BRANCH,       Branch Greater/Equal,             pc <-- pc + {imm} if {rs1} >= {rs2}
+BLTU,   B,  BRANCH,       Branch Less Than Unsigned,        pc <-- pc + {imm} if {rs1} < {rs2} (unsigned)
+BGEU,   B,  BRANCH,       Branch Greater/Equal Unsigned,    pc <-- pc + {imm} if {rs1} >= {rs2} (unsigned)
+LB,     I,  MEM.LOAD,     Load Byte,                        {rd} <-- sign_ext(mem({rs1} + {imm})[7:0])
+LH,     I,  MEM.LOAD,     Load Half,                        {rd} <-- sign_ext(mem({rs1} + {imm})[15:0])
+LW,     I,  MEM.LOAD,     Load Word,                        {rd} <-- mem({rs1} + {imm})[31:0]
+LBU,    I,  MEM.LOAD,     Load Byte Unsigned,               {rd} <-- zero_ext(mem({rs1} + {imm})[7:0])
+LHU,    I,  MEM.LOAD,     Load Half Unsigned,               {rd} <-- zero_ext(mem({rs1} + {imm})[15:0])
+SB,     S,  MEM.STR,      Store Byte,                       mem({rs1} + {imm}) <-- {rs2}[7:0]
+SH,     S,  MEM.STR,      Store Half,                       mem({rs1} + {imm}) <-- {rs2}[15:0]
+SW,     S,  MEM.STR,      Store Word,                       mem({rs1} + {imm}) <-- {rs2}[31:0]
+SLTI,   I,  INT.SET,      Set Less Than Immediate,          {rd} <-- {rs1} < sign_ext({imm}) ? 1:0
+SLTIU,  I,  INT.SET,      Set Less Than Immediate Unsigned, {rd} <-- {rs1} < sign_ext({imm}) ? 1:0 (unsigned)
+SLT,    R,  INT.SET,      Set Less Than,                    {rd} <-- {rs1} < {rs2} ? 1:0
+SLTU,   R,  INT.SET,      Set Less Than Unsigned,           {rd} <-- {rs1} < {rs2} ? 1:0 (unsigned)
+SLLI,   I,  INT.SHIFT,    Shift Left Logical Immediate,     {rd} <-- {rs1} << {imm}
+SRLI,   I,  INT.SHIFT,    Shift Right Logical Immediate,    {rd} <-- {rs1} >> {imm}
+SRAI,   I,  INT.SHIFT,    Shift Right Arithmetic Immediate, {rd} <-- {rs1} >> {imm} (fixed sign bit)
+SLL,    R,  INT.SHIFT,    Shift Left Logical,               {rd} <-- {rs1} << {rs2}
+SRL,    R,  INT.SHIFT,    Shift Right Logical,              {rd} <-- {rs1} >> {rs2}
+SRA,    R,  INT.SHIFT,    Shift Right Arithmetic,           {rd} <-- {rs1} >> {rs2} (shift sign bit to upper bit)
+XORI,   I,  INT.LOGIC,    eXclusive OR Immediate,           {rd} <-- {rs1} ^ {imm}
+ORI,    I,  INT.LOGIC,    OR Immediate,                     {rd} <-- {rs1} | {imm}
+ANDI,   I,  INT.LOGIC,    AND Immediate,                    {rd} <-- {rs1} & {imm}
+XOR,    R,  INT.LOGIC,    eXclusive OR,                     {rd} <-- {rs1} ^ {rs2}
+OR,     R,  INT.LOGIC,    OR,                               {rd} <-- {rs1} | {rs2}
+AND,    R,  INT.LOGIC,    AND,                              {rd} <-- {rs1} & {rs2}
