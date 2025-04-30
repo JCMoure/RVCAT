@@ -3,13 +3,11 @@ import importlib.resources
 import json
 import os
 
-from typing      import Optional
+from typing       import Optional
 from .instruction import Instruction
 from .cache       import Cache
 from .isa         import _isa
 
-
-#PROCESSOR_PATH = "./processors"
 PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
 global _processor
 
@@ -26,9 +24,11 @@ class Processor:
         self.mPenalty  = 0
         self.mIssueTime= 0
 
+
     def list_processors_json(self) -> str:
         processors = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".cfg")]
         return json.dumps(processors)
+
 
     def load_processor(self, name: str) -> None:
 
@@ -116,8 +116,10 @@ class Processor:
 
         return 1,next(iter(self.ports))
 
+
     def json(self) -> str:
         return json.dumps(self.__dict__())
+
 
     def __dict__(self) -> dict:
         return {

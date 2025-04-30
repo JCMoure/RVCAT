@@ -1,4 +1,4 @@
-from   math import inf
+from math import inf
 
 def old_priority(isps: dict[int,list]) -> dict[tuple[int,int]]:
       _ais    = [inf]               # assigned instructions

@@ -6,7 +6,6 @@ import importlib.resources
 import json
 import os
 
-#PROGRAM_PATH = "./examples"
 PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples")
 
 global _program
@@ -82,6 +81,7 @@ class Program:
         programs = ['.'.join(f.split('.')[:-1]) for f in os.listdir(PROGRAM_PATH) if f.endswith(".s")]
         return json.dumps(programs)
 
+
     def generate_dependencies(self) -> None:
 
         for i_1, instr_1 in self.instructions:
@@ -143,6 +143,7 @@ class Program:
             DependenceEdges.append(offsets)
 
         return DependenceEdges
+
 
     def show_critical_path(self, n_iter= 1) -> str:
 
@@ -371,6 +372,7 @@ class Program:
         out += "##################################################################################\n\n"
         return out
 
+
     def get_recurrent_paths_graphviz(self) -> str:
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
         start_instrs = []
@@ -419,7 +421,6 @@ class Program:
         for iter_idx in range(1, max_iters+1):
             for ins_idx, instruction in self.instructions:
 
-                #out += f"iter{iter_idx}ins{ins_idx} [label=\"{instruction.HLdescrp}\\n{instruction.action}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
                 out += f"iter{iter_idx}ins{ins_idx} [label=\"{instruction.HLdescrp}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
 
                 for rs, i_d in self.dependencies[ins_idx].items():
@@ -456,6 +457,7 @@ class Program:
 
         return out + "}\n"
 
+
     def show_dependencies(self) -> str:
         out = "··············· Program Description with Instruction Data-Dependences ························"
         for i, instruction in self.instructions:
@@ -472,17 +474,16 @@ class Program:
             for rs, i_d in self.dependencies[i].items():
                 reg   = eval(f"self.instructions[{i}][1].{rs}")
                 if i_d >= i:
-                  #out += f"\033[96m"
                   out += f"<b>"
 
                 out += f"{i_d} --> {reg}; "
 
                 if i_d >= i:
-                  #out += f"\033[0m"
                   out += f"</b>"
 
         out += "\n······························································································\n\n"
         return out
+
 
 
     def get_dependencies_grapviz(self, num_iters=5) -> str:
@@ -545,8 +546,6 @@ class Program:
 
         for iter_idx in range(num_iters):
             for ins_idx, instruction in self.instructions:
-
-                #out += f"iter{iter_idx}ins{ins_idx} [label=\"{instruction.HLdescrp}\\n{instruction.action}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
                 out += f"iter{iter_idx}ins{ins_idx} [label=\"{instruction.HLdescrp}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
 
                 for rs, i_d in self.dependencies[ins_idx].items():
@@ -560,9 +559,6 @@ class Program:
                             break
 
 
-                        #if i_d >= ins_idx:
-                        #    dep_ins_longest_path_idx = self.n*(iter_idx-1) + i_d
-                        #else:
                         dep_ins_longest_path_idx = self.n*iter_idx + i_d
 
                         if i_d >= ins_idx:
@@ -579,7 +575,6 @@ class Program:
                     longest_path_str = ", color=red" if is_in_longest_path else ""
 
                     if i_d >= ins_idx:
-                        #out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx+1}ins{ins_idx}[label=\"{reg}\", color=red, penwidth=2.0];\n"
                         out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx+1}ins{ins_idx}[label=\"{reg}\", penwidth=2.0 {longest_path_str}];\n"
                     else:
                         out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\" {longest_path_str}];\n"
@@ -595,8 +590,6 @@ class Program:
                 out += f"iter{num_iters}ins{ins_idx} [label=\"{instruction.HLdescrp}\", shape=\"box\"];\n"
         out += "}\n"
         out = out.replace('<--', '←')
-        #with open("graph.dot", "w") as f:
-        #    f.write(out)
         return out
 
 
@@ -781,6 +774,7 @@ class Program:
                     out += f" Init_ADDR={instruction.addr:4} Stride={instruction.stride:2} N={instruction.N:3}\n"
 
         return out
+
 
     def show_memory_trace(self) -> str:
         out = "····························· Memory Trace Description ···························"

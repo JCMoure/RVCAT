@@ -1,8 +1,6 @@
 import csv
 from typing import Optional
 
-#ISA_PATH = "./isas"
-
 import importlib.resources
 ISA_PATH = importlib.resources.files("rvcat").joinpath("isas")
 

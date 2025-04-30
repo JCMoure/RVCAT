@@ -46,11 +46,6 @@ proposals, even though all of them can be susceptible to change.
   specifying the number of iterations `n` (`-i, --iterations`) and execution
   window size `s` (`-w, --window_size`) in number of instructions.
 
-### `set`
-* `set processor <attribute> <value>`* sets a specific processor's `attribute`
-  to a certain `value`
-
-
 ## Arguments
 Although it's supposed that the main way to execute actions will be via the
 interactive shell, the tool will also proportionate equivalent arguments to the
