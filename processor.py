@@ -7,6 +7,7 @@ from typing       import Optional
 from .instruction import Instruction
 from .cache       import Cache
 from .isa         import _isa
+from pathlib      import Path
 
 PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
 global _processor
@@ -26,20 +27,52 @@ class Processor:
 
 
     def list_processors_json(self) -> str:
-        processors = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".cfg")]
+        processors = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if (f.endswith(".cfg") or f.endswith(".json"))]
         return json.dumps(processors)
-
+    
+    def load_processor_json(self, config: dict) -> None:
+        config_json = json.loads(config)
+        self.name        = config_json.get("name", "")
+        self.stages      = config_json.get("stages", {})
+        self.resources   = config_json.get("resources", {})
+        self.ports       = config_json.get("ports", {})
+        self.rports      = config_json.get("rports", {})
+        self.nBlocks     = config_json.get("nBlocks", 0)
+        self.blkSize     = config_json.get("blkSize", 0)
+        self.mPenalty    = config_json.get("mPenalty", 0)
+        self.mIssueTime  = config_json.get("mIssueTime", 0)
+        self.cache       = None
+        if self.nBlocks > 0:
+            self.cache   = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
 
     def load_processor(self, name: str) -> None:
 
-        config = configparser.ConfigParser(allow_no_value=True)
+        proc_dir = PROCESSOR_PATH
+        base, ext = Path(name).stem, Path(name).suffix.lower()
 
-        file = f"{PROCESSOR_PATH}/{name}.cfg"
-        with open(file, "r") as f:
+        # Build candidate paths
+        cfg_path  = proc_dir / (base + ".cfg")
+        json_path = proc_dir / (base + ".json")
+
+        # If user explicitly passed .json, or .json exists and .cfg doesn't, load JSON
+        if ext == ".json" or (json_path.exists() and not cfg_path.exists()):
+            p = json_path if ext != ".json" else proc_dir / name
+            if not p.exists():
+                raise FileNotFoundError(f"JSON processor file not found: {p}")
+            text = p.read_text()
+            # this expects a JSON string
+            self.load_processor_json(text)
+            return
+
+        p = cfg_path if ext != ".cfg" else proc_dir / name
+        if not p.exists():
+            raise FileNotFoundError(f"CFG processor file not found: {p}")
+        config = configparser.ConfigParser(allow_no_value=True)
+        with open(p, "r") as f:
             config.read_file(f)
 
         if "general" not in config:
-            return
+            raise ValueError(f"No [general] section in {p}")
 
         self.name   = config.get("general", "name")
         self.sched  = config.get("general", "scheduler", fallback="greedy")
@@ -52,33 +85,46 @@ class Processor:
         }
         
         self.ports = {}
-        ports = [section for section in config.sections() 
-                         if section.startswith("port.")]
-
-        for port in ports:
-            self.ports[port[5:]] = list(map(str.upper, config[port]))
+        for section in config.sections():
+            if section.startswith("port."):
+                port = section[5:]
+                self.ports[port] = list(map(str.upper, config[section]))
 
         self.rports = {}
-        for port, instr_types in self.ports.items():
-            for instr_type in instr_types:
-                self.rports[instr_type]= []
-        
-        for port, instr_types in self.ports.items():
-            for instr_type in instr_types:
-                self.rports[instr_type].append(port)
+        for port, instrs in self.ports.items():
+            for ins in instrs:
+                self.rports.setdefault(ins, []).append(port)
 
         self.nBlocks   = int(config.get("cache", "numBlocks"))
         self.blkSize   = int(config.get("cache", "blockSize"))
         self.mPenalty  = int(config.get("cache", "missPenalty"))
         self.mIssueTime= int(config.get("cache", "missIssueTime"))
 
-        self.cache     = None
+        self.cache = None
         if self.nBlocks > 0:
-            self.cache = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+            self.cache = Cache(self.nBlocks, self.blkSize,
+                               self.mPenalty, self.mIssueTime)
 
         isas = config.get("general", "isas", fallback="").split(",")
         for isa in isas:
             _isa.load_isa(isa.strip())
+
+    def import_processor_json(self, config: str) -> None:
+
+        if isinstance(config, str):
+            try:
+                cfg = json.loads(config)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON: {e}")
+        else:
+            cfg = config
+
+        out_path: Path = PROCESSOR_PATH.joinpath(f"{cfg['name']}.json")
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(out_path, "w") as f:
+            json.dump(cfg, f, indent=2)
 
 
     def reset(self) -> None:

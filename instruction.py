@@ -1,5 +1,6 @@
 from enum import Enum
 from .isa import _isa
+import json
 
 
 class InstrFormat(Enum):
@@ -110,3 +111,27 @@ class Instruction:
         if self.HLdescrp == "" or mode == 0:
           return f"{self.mnemonic:7} {','.join(self.operands): <16}"
         return f"{self.HLdescrp: <16}"
+    
+    def json(self) -> str:
+    
+        return {
+            "mnemonic":   self.mnemonic,
+            "operands":   self.operands,
+            "action":     self.action,
+            "type":       self.type,
+            "HLdescrp":   self.HLdescrp,
+            "LLdescrp":   self.LLdescrp,
+            "format":     self.format.value,
+            "rd":         self.rd,
+            "rs1":        self.rs1,
+            "rs2":        self.rs2,
+            "rs3":        self.rs3,
+            "imm":        self.imm,
+            "memory":     self.memory.value,
+            "addr":       self.addr,
+            "stride":     self.stride,
+            "N":          self.N,
+            "nextaddr":   self.nextaddr,
+            "count":      self.count
+        }
+
