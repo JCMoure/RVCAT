@@ -39,6 +39,8 @@ class Program:
     
     def load_program_json(self, data):
 
+        print("loading json program");
+
         if isinstance(data, str):
             try:
                 cfg = json.loads(data)
@@ -56,35 +58,7 @@ class Program:
         instrs = []
         for idx, entry in enumerate(cfg.get("instructions", [])):
             instr_dict = json.loads(entry) if isinstance(entry, str) else entry
-
-            instr = Instruction(
-                instr_dict.get("mnemonic", ""),
-                instr_dict.get("operands", []),
-                instr_dict.get("HLdescrp", ""),
-                []
-            )
-
-            instr.action    = instr_dict.get("action", "")
-            instr.type      = instr_dict.get("type", "")
-            instr.LLdescrp  = instr_dict.get("LLdescrp", "")
-
-            fmt = instr_dict.get("format", "")
-            instr.format   = InstrFormat(fmt) if fmt in InstrFormat._value2member_map_ else InstrFormat.NONE
-
-            instr.rd       = instr_dict.get("rd", "")
-            instr.rs1      = instr_dict.get("rs1", "")
-            instr.rs2      = instr_dict.get("rs2", "")
-            instr.rs3      = instr_dict.get("rs3", "")
-            instr.imm      = instr_dict.get("imm", "")
-
-            mem = instr_dict.get("memory", "")
-            instr.memory   = MemType(mem) if mem in MemType._value2member_map_ else MemType.NONE
-            instr.addr     = instr_dict.get("addr", 0)
-            instr.stride   = instr_dict.get("stride", 0)
-            instr.N        = instr_dict.get("N", 0)
-            instr.nextaddr = instr_dict.get("nextaddr", 0)
-            instr.count    = instr_dict.get("count", 0)
-
+            instr = Instruction.from_json(instr_dict)
             instrs.append((idx, instr))
 
         self.instructions = instrs
@@ -98,70 +72,70 @@ class Program:
 
 
     def load_program(self, file="") -> None:
+        if(file!=""):
+            parser   = Parser()
 
-        parser   = Parser()
+            if file:
+                json_path = PROGRAM_PATH.joinpath(f"{file}.json")
+                asm_path  = PROGRAM_PATH.joinpath(f"{file}.s")
 
-        if file:
-            json_path = PROGRAM_PATH.joinpath(f"{file}.json")
-            asm_path  = PROGRAM_PATH.joinpath(f"{file}.s")
+                if json_path.exists():
+                    # load from JSON
+                    with open(json_path, "r") as f:
+                        cfg = json.load(f)
+                    self.load_program_json(cfg)
+                    return
+                elif asm_path.exists():
+                    self.name = str(asm_path)
+                else:
+                    raise FileNotFoundError(
+                        f"Neither {json_path} nor {asm_path} exist."
+                    )
 
-            if json_path.exists():
-                # load from JSON
-                with open(json_path, "r") as f:
-                    cfg = json.load(f)
-                self.import_program_json(cfg)
-                return
-            elif asm_path.exists():
-                self.name = str(asm_path)
-            else:
-                raise FileNotFoundError(
-                    f"Neither {json_path} nor {asm_path} exist."
-                )
+            prg_list = parser.parse_file(self.name)
 
-        prg_list = parser.parse_file(self.name)
+            self.instructions = []
 
-        self.instructions = []
+            mnemonic = None
+            operands = []
+            HLdesc   = ""
+            Annotate = []
+            self.pad = 0
+            self.pad_type= 0
 
-        mnemonic = None
-        operands = []
-        HLdesc   = ""
-        Annotate = []
-        self.pad = 0
-        self.pad_type= 0
+            for item in prg_list:
+                if type(item) == Mnemonic:
+                    # Insert new instruction
+                    if mnemonic != None:
+                        self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
+                        self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
 
-        for item in prg_list:
-            if type(item) == Mnemonic:
-                # Insert new instruction
-                if mnemonic != None:
-                  self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
-                  self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
+                    operands = []
+                    HLdesc   = ""
+                    Annotate = []
+                    mnemonic = item.name
+                elif type(item) == Operands:
+                    operands = item.name
+                elif type(item) == Description:
+                    HLdesc = item.name
+                    self.pad = max(self.pad, len(HLdesc))
+                elif type(item) == Annotation:
+                    Annotate = item.name
 
-                operands = []
-                HLdesc   = ""
-                Annotate = []
-                mnemonic = item.name
-            elif type(item) == Operands:
-                operands = item.name
-            elif type(item) == Description:
-                HLdesc = item.name
-                self.pad = max(self.pad, len(HLdesc))
-            elif type(item) == Annotation:
-                Annotate = item.name
+            if mnemonic != None:
+                self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
+                self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
 
-        if mnemonic != None:
-            self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
-            self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
+            self.loaded       = True
+            self.instructions = list(enumerate(self.instructions))
+            self.n            = len(self.instructions)
 
-        self.loaded       = True
-        self.instructions = list(enumerate(self.instructions))
-        self.n            = len(self.instructions)
+            self.processor    = _processor
+            self.processor.reset()
 
-        self.processor    = _processor
-        self.processor.reset()
-
-        self.dependencies     = {}
-        self.dependency_graph = {i:[] for i,_ in self.instructions}
-        self.generate_dependencies()
+            self.dependencies     = {}
+            self.dependency_graph = {i:[] for i,_ in self.instructions}
+            self.generate_dependencies()
 
 
     def json(self):

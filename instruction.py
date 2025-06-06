@@ -106,6 +106,41 @@ class Instruction:
                 elif Annotations[i-1] == "N":
                     self.N      = int(Annotations[i+1])
 
+    @staticmethod
+    def from_json(data: dict):
+        instr = Instruction(
+            data.get("mnemonic", ""),
+            data.get("operands", []),
+            data.get("HLdescrp", ""),
+            []  # Annotations don't need to be restored here
+        )
+
+        # Override fields explicitly
+        instr.action    = data.get("action", "")
+        instr.type      = data.get("type", "")
+        instr.LLdescrp  = data.get("LLdescrp", "")
+
+        fmt = data.get("format", "")
+        instr.format    = InstrFormat(fmt) if fmt in InstrFormat._value2member_map_ else InstrFormat.NONE
+
+        instr.rd        = data.get("rd", "")
+        instr.rs1       = data.get("rs1", "")
+        instr.rs2       = data.get("rs2", "")
+        instr.rs3       = data.get("rs3", "")
+        instr.imm       = data.get("imm", "")
+
+        mem = data.get("memory", "")
+        instr.memory    = MemType(mem) if mem in MemType._value2member_map_ else MemType.NONE
+
+        instr.addr      = data.get("addr", 0)
+        instr.stride    = data.get("stride", 0)
+        instr.N         = data.get("N", 0)
+        instr.nextaddr  = data.get("nextaddr", 0)
+        instr.count     = data.get("count", 0)
+
+        return instr
+
+
 
     def __repr__(self, mode=0) -> str:
         if self.HLdescrp == "" or mode == 0:
