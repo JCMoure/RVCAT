@@ -1,6 +1,7 @@
 from .instruction import Instruction, InstrFormat, MemType
 from .processor   import Processor, _processor
 from .parser      import Parser, Mnemonic, Operands, Description, Annotation
+from pathlib      import Path
 
 import importlib.resources
 import json
@@ -20,65 +21,142 @@ class Program:
         self.pad          = 0
         self.pad_type     = 0
 
+    def import_program_json(self, data):
+        if isinstance(data, str):
+            try:
+                cfg = json.loads(data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON: {e}")
+        else:
+            cfg = data
 
-    def load_program(self, file="") -> None:
+        out_path: Path = PROGRAM_PATH.joinpath(f"{cfg['name']}.json")
 
-        parser   = Parser()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if file != "":
-           self.name  = f"{PROGRAM_PATH}/{file}.s"
-        elif not self.loaded:
-           self.name  = f"{PROGRAM_PATH}/vectoradd.s"
+        with open(out_path, "w") as f:
+            json.dump(cfg, f, indent=2)
+    
+    def load_program_json(self, data):
 
-        prg_list = parser.parse_file(self.name)
+        print("loading json program");
 
-        self.instructions = []
+        if isinstance(data, str):
+            try:
+                cfg = json.loads(data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON: {e}")
+        else:
+            cfg = data
 
-        mnemonic = None
-        operands = []
-        HLdesc   = ""
-        Annotate = []
-        self.pad = 0
-        self.pad_type= 0
+        self.name      = cfg.get("name", "")
+        self.n         = cfg.get("n", 0)
+        self.pad       = cfg.get("pad", 0)
+        self.pad_type  = cfg.get("pad_type", 0)
+        self.loaded    = True
 
-        for item in prg_list:
-            if type(item) == Mnemonic:
-                # Insert new instruction
-                if mnemonic != None:
-                  self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
-                  self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
+        instrs = []
+        for idx, entry in enumerate(cfg.get("instructions", [])):
+            instr_dict = json.loads(entry) if isinstance(entry, str) else entry
+            instr = Instruction.from_json(instr_dict)
+            instrs.append((idx, instr))
 
-                operands = []
-                HLdesc   = ""
-                Annotate = []
-                mnemonic = item.name
-            elif type(item) == Operands:
-                operands = item.name
-            elif type(item) == Description:
-                HLdesc = item.name
-                self.pad = max(self.pad, len(HLdesc))
-            elif type(item) == Annotation:
-                Annotate = item.name
-
-        if mnemonic != None:
-            self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
-            self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
-
-        self.loaded       = True
-        self.instructions = list(enumerate(self.instructions))
-        self.n            = len(self.instructions)
+        self.instructions = instrs
+        self.n            = len(instrs)
 
         self.processor    = _processor
         self.processor.reset()
-
         self.dependencies     = {}
-        self.dependency_graph = {i:[] for i,_ in self.instructions}
+        self.dependency_graph = {i: [] for i, _ in instrs}
         self.generate_dependencies()
 
 
+    def load_program(self, file="") -> None:
+        if(file!=""):
+            parser   = Parser()
+
+            if file:
+                json_path = PROGRAM_PATH.joinpath(f"{file}.json")
+                asm_path  = PROGRAM_PATH.joinpath(f"{file}.s")
+
+                if json_path.exists():
+                    # load from JSON
+                    with open(json_path, "r") as f:
+                        cfg = json.load(f)
+                    self.load_program_json(cfg)
+                    return
+                elif asm_path.exists():
+                    self.name = str(asm_path)
+                else:
+                    raise FileNotFoundError(
+                        f"Neither {json_path} nor {asm_path} exist."
+                    )
+
+            prg_list = parser.parse_file(self.name)
+
+            self.instructions = []
+
+            mnemonic = None
+            operands = []
+            HLdesc   = ""
+            Annotate = []
+            self.pad = 0
+            self.pad_type= 0
+
+            for item in prg_list:
+                if type(item) == Mnemonic:
+                    # Insert new instruction
+                    if mnemonic != None:
+                        self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
+                        self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
+
+                    operands = []
+                    HLdesc   = ""
+                    Annotate = []
+                    mnemonic = item.name
+                elif type(item) == Operands:
+                    operands = item.name
+                elif type(item) == Description:
+                    HLdesc = item.name
+                    self.pad = max(self.pad, len(HLdesc))
+                elif type(item) == Annotation:
+                    Annotate = item.name
+
+            if mnemonic != None:
+                self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
+                self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
+
+            self.loaded       = True
+            self.instructions = list(enumerate(self.instructions))
+            self.n            = len(self.instructions)
+
+            self.processor    = _processor
+            self.processor.reset()
+
+            self.dependencies     = {}
+            self.dependency_graph = {i:[] for i,_ in self.instructions}
+            self.generate_dependencies()
+
+
+    def json(self):
+        return json.dumps(self.__dict__(), indent=2)
+    
+    def __dict__(self):
+        data= {
+            "n": self.n,
+            "name": os.path.splitext(os.path.basename(self.name))[0],
+            "pad": self.pad,
+            "pad_type": self.pad_type
+        }
+        data["instructions"]=[]
+        for instruction in self.instructions:
+            data["instructions"].append(instruction[1].json())
+
+        return data
+
     def list_programs_json(self) -> str:
 
-        programs = ['.'.join(f.split('.')[:-1]) for f in os.listdir(PROGRAM_PATH) if f.endswith(".s")]
+        programs = ['.'.join(f.split('.')[:-1]) for f in os.listdir(PROGRAM_PATH) if (f.endswith(".s") or f.endswith(".json"))]
         return json.dumps(programs)
 
 

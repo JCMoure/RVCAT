@@ -161,7 +161,9 @@ def critical_path_statistics_json (program, path) -> str:
 
     out = {'instructions': []}
     for i in range(N):
-        out['instructions'].append({'instruction': i, 'percentage': 100*histogram[i]/total_lat})
+        out['instructions'].append({'id': i,
+                                    'instruction': program.instructions[i][1].HLdescrp,
+                                    'percentage': 100*histogram[i]/total_lat})
 
     out['dispatch'] = 100*decode_lat/total_lat
     out['retire'] = 100*retire_lat/total_lat
