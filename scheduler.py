@@ -1,14 +1,18 @@
 from copy        import copy
 import json
+
 from .window      import Window, InstrState
 from .program     import Program
 from .processor   import Processor, _processor
 from .instruction import Instruction, MemType
+
 from . import exec_graph as ex
 
 global _scheduler
 
+
 class Scheduler:
+
     def __init__(self, processor: Processor) -> None:
         self.processor = processor
 
@@ -26,7 +30,7 @@ class Scheduler:
         self.pc         = 0
         self.cycles     = 0
 
-        self.DepEdges = program.generate_dependence_info()
+        self.DepEdges   = program.generate_dependence_info()
 
 
     def next_cycle(self) -> int:
@@ -462,6 +466,7 @@ class Scheduler:
         self.n = global_n
 
         return out_cycles + out_Ports + out_MM + "\n" + out_cycles + out_timeline
+
 
 
     def format_timeline2(self, niters: int = 3) -> str:

@@ -21,6 +21,7 @@ class Program:
         self.pad          = 0
         self.pad_type     = 0
 
+
     def import_program_json(self, data):
         if isinstance(data, str):
             try:
@@ -36,7 +37,8 @@ class Program:
 
         with open(out_path, "w") as f:
             json.dump(cfg, f, indent=2)
-    
+
+
     def load_program_json(self, data):
 
         print("loading json program");
@@ -141,6 +143,7 @@ class Program:
     def json(self):
         return json.dumps(self.__dict__(), indent=2)
     
+
     def __dict__(self):
         data= {
             "n": self.n,
@@ -153,6 +156,7 @@ class Program:
             data["instructions"].append(instruction[1].json())
 
         return data
+
 
     def list_programs_json(self) -> str:
 
@@ -451,6 +455,7 @@ class Program:
         return out
 
 
+
     def get_recurrent_paths_graphviz(self) -> str:
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
         start_instrs = []
@@ -534,6 +539,7 @@ class Program:
                         out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\", color={curr_color}];\n"
 
         return out + "}\n"
+
 
 
     def show_dependencies(self) -> str:
@@ -671,6 +677,7 @@ class Program:
         return out
 
 
+
     def annotate_action(self) -> str:
         out = "············· Program Description with Register-Level Transfer Language ······················"
         for i, instruction in self.instructions:
@@ -682,6 +689,7 @@ class Program:
                 out += f": {instruction.LLdescrp:16}"
         out += "\n······························································································\n\n"
         return out
+
 
 
     def show_small_perf_analysis(self) -> str:

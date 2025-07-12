@@ -1,5 +1,6 @@
 from enum import Enum
 from .isa import _isa
+
 import json
 
 
@@ -21,6 +22,7 @@ class MemType(Enum):
 
 
 class Instruction:
+
     def __init__(self, mnemonic: str, operands: list, HLdescription: str, Annotations: list) -> None:
         self.mnemonic = mnemonic
         self.operands = operands
@@ -106,6 +108,7 @@ class Instruction:
                 elif Annotations[i-1] == "N":
                     self.N      = int(Annotations[i+1])
 
+
     @staticmethod
     def from_json(data: dict):
         instr = Instruction(
@@ -141,12 +144,12 @@ class Instruction:
         return instr
 
 
-
     def __repr__(self, mode=0) -> str:
         if self.HLdescrp == "" or mode == 0:
           return f"{self.mnemonic:7} {','.join(self.operands): <16}"
         return f"{self.HLdescrp: <16}"
-    
+
+
     def json(self) -> str:
     
         return {
@@ -169,4 +172,3 @@ class Instruction:
             "nextaddr":   self.nextaddr,
             "count":      self.count
         }
-

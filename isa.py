@@ -2,11 +2,13 @@ import csv
 from typing import Optional
 
 import importlib.resources
+
 ISA_PATH = importlib.resources.files("rvcat").joinpath("isas")
 
 global _isa
 
 class ISA:
+
     def __init__(self) -> None:
         self.isas = {}
         self.instructions = {}

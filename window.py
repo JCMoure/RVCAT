@@ -1,5 +1,6 @@
 from typing      import Optional
 from .instruction import MemType
+
 from enum        import Enum
 
 class InstrState(Enum):
@@ -17,6 +18,7 @@ class InstrState(Enum):
     NONE           = " "
 
 class InstrInstance:
+
     def __init__(self, dispatch_cycle: int, dynamic_idx: int, static_idx: int, mType: MemType, addr: int) -> None:
         self.d_idx    = dynamic_idx
         self.s_idx    = static_idx
@@ -30,12 +32,12 @@ class InstrInstance:
         self.memAddr  = addr
         self.exec_lat = 0       # statistic of total execution latency, including waiting for resources
 
-
-def __repr__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.d_idx}: <{self.s_idx}, {self.cycle}>"
 
 
 class Window:
+
     def __init__(self, size: int) -> None:
         self.count = 0
         self.first = 0
@@ -86,7 +88,6 @@ class Window:
             return self.buffer[(i+self.first) % self.size]
         else:
             raise IndexError
-
 
     def __repr__(self) -> str:
         out = ""

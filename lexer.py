@@ -1,5 +1,6 @@
 from enum import Enum, auto
 
+
 class TokenType(Enum):
     LF = auto()
     EOF = auto()
@@ -12,6 +13,7 @@ class TokenType(Enum):
     STR2 = auto()
     SYMBOL = auto()
     UNDEF = auto()
+
 
 class Token:
     def __init__(self, value: str, type: TokenType) -> None:

@@ -10,9 +10,11 @@ from .isa         import _isa
 from pathlib      import Path
 
 PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
+
 global _processor
 
 class Processor:
+
     def __init__(self) -> None:
         self.name      = ""
         self.stages    = {}
@@ -24,12 +26,14 @@ class Processor:
         self.blkSize   = 0
         self.mPenalty  = 0
         self.mIssueTime= 0
+        self.sched     = "greedy"
 
 
     def list_processors_json(self) -> str:
         processors = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if (f.endswith(".cfg") or f.endswith(".json"))]
         return json.dumps(processors)
-    
+
+
     def load_processor_json(self, config: dict) -> None:
         config_json = json.loads(config)
         self.name        = config_json.get("name", "")
@@ -41,9 +45,11 @@ class Processor:
         self.blkSize     = config_json.get("blkSize", 0)
         self.mPenalty    = config_json.get("mPenalty", 0)
         self.mIssueTime  = config_json.get("mIssueTime", 0)
+        self.sched       = config_json.get("sched", "")
         self.cache       = None
         if self.nBlocks > 0:
             self.cache   = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+
 
     def load_processor(self, name: str) -> None:
 
@@ -109,6 +115,7 @@ class Processor:
         for isa in isas:
             _isa.load_isa(isa.strip())
 
+
     def import_processor_json(self, config: str) -> None:
 
         if isinstance(config, str):
@@ -170,6 +177,7 @@ class Processor:
     def __dict__(self) -> dict:
         return {
             "name"      : self.name,
+            "sched"     : self.sched,
             "stages"    : self.stages,
             "resources" : self.resources,
             "ports"     : self.ports,
@@ -180,36 +188,4 @@ class Processor:
             "mIssueTime": self.mIssueTime
         }
 
-    def __repr__(self) -> str:
-
-        out = f"+++++++++++++++++++++++++++++++++++++++++++++++++++++++\nPROCESSOR name is {self.name}\n"
-
-        for stage, width in self.stages.items():
-            out += f"  {stage} width = {width}\n"
-
-        out += f"\n  Scheduler = {self.sched}\n\n"
-
-        if self.nBlocks > 0:
-            out += f"  CACHE  Blocks={self.nBlocks}  "
-            out += f"BlkSize={self.blkSize}  "
-            out += f"MissPenalty={self.mPenalty}  "
-            out += f"MissIssueTime={self.mIssueTime}\n\n"
-
-        out += f"   Instruction Type    Latency\n"
-        out += f"   ----------------   ----------\n"
-
-        for resource, ports in self.rports.items():
-            latency = self.resources[resource]
-            out += f"     {resource:16}  {latency:^2} cycles\n"
-
-        out += f"\n   Execution Port    Instruction Types\n"
-        out += f"   --------------    -----------------\n"
-        for port in self.ports:
-            out += f"       P.{port:10}  {self.ports[port]}\n"
-
-        out += "\n++++++++++++++++++++++++++++++++++++++++++++++++++++++\n\n"
-        return out
-
-
 _processor = Processor()
-_processor.load_processor("baseline")

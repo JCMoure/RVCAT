@@ -141,6 +141,7 @@ def critical_path_statistics (program, path) -> str:
      out += f"    RETIRE   : {100*retire_lat/total_lat:0.2f}%\n"
      return out
 
+
 def critical_path_statistics_json (program, path) -> str:
     N         = program.n
     total_lat = 0
@@ -182,6 +183,7 @@ def print_graph ( program, ExecGraph ):
          out += f"   Execute = {get_list_of_edges(ExecGraph[i*3+1])}\n"
          out += f"   Retire  = {get_list_of_edges(ExecGraph[i*3+2])}\n"
      print(out)
+
 
 
 def exec_graph_update(ExecGraph, dynamic_idx, disp_latency, exec_latency, ret_latency):
