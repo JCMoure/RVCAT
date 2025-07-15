@@ -227,235 +227,6 @@ class Program:
         return DependenceEdges
 
 
-    def show_critical_path(self, n_iter= 1) -> str:
-
-        n = self.n
-        start_instrs   = []
-        latencies      = []
-        critical_paths = []
-        dep_graph      = { i:[] for i in range(n*n_iter)}
-
-        for i in range(n):
-            if all(i <= j for j in self.dependencies[i].values()):
-                start_instrs.append(i)
-
-            for dep in self.dependencies[i].values():
-               if dep >= i:
-                   # i depends on instruction (dep) in previous loop iteration (loop-carried)
-                   for q in range(n_iter-1):  # do not insert dependence on last loop iteration
-                      dep_graph[dep+q*n].append(i+(q+1)*n)
-               else:
-                   # i depends on instruction (dep) in current loop iteration (not loop-carried)
-                   for q in range(n_iter):  # insert dependence on all loop iterations
-                      dep_graph[dep+q*n].append(i+q*n)
-
-            resource = self.processor.get_resource(self.instructions[i][1].type)
-            if not resource:
-                latency = 1
-            else:
-                latency = resource[0]
-            latencies.append(latency)
-
-        max_latency = 0
-        paths = [ [i] for i in start_instrs]  # instructions that do not depend on previous instructions
-        while paths:
-            path = paths.pop()
-            last = path[-1]
-            if not dep_graph[last]: # end of graph
-                latency = sum(latencies[i%n] for i in path)
-                if latency > max_latency:
-                    max_latency = latency
-                    critical_paths = [path]
-                if latency == max_latency:
-                    critical_paths.append(path)
-            else:
-                for dep in dep_graph[last]:
-                    paths.append ( path + [dep] )
-
-        out  = "###################################################################################\n"
-        out += f"      **** Critical Path Analysis of n_iter={n_iter} loop iterations ***\n\n"
-        out += f" Total Latency of critical path is {max_latency:0.2f} cycles\n\n"
-        for path in critical_paths:
-           out += f"\033[95m"
-           for i in path[:-1]:
-                id = i % n
-                out += f"[{id}]{self.instructions[id][1].HLdescrp} "
-                out += f"({latencies[id]} cycles) -> "
-
-           id = path[-1] % n
-           out += f"[{id}]{self.instructions[id][1].HLdescrp} "
-           out += f"({latencies[id]} cycles)\n"
-           out += f"\033[0m"
-
-           out += f"      Total cycles = "
-           if len(path)>1:
-             for i in path[:-1]:
-               out += f"{latencies[i%n]}+"
-             out += f"{latencies[path[-1]%n]} = "
-
-           out += f"{max_latency}\n\n"
-
-        return out
-
-
-    def show_static_performance_analysis(self) -> str:
-        ports        = list( self.processor.ports.keys() )
-        n_ports      = len ( ports )
-        start_instrs = []
-        latencies    = []
-        resources    = []
-
-        for i in range(self.n):
-            if all(i <= j for j in self.dependencies[i].values()):
-                start_instrs.append(i)
-
-            resource = self.processor.get_resource(self.instructions[i][1].type)
-            if not resource:
-                latency = 1
-            else:
-                latency = resource[0]
-            latencies.append(latency)
-            instr_mask=0
-            mask_bit=1
-            for j in range(n_ports):
-                if ports[j] in resource[1]:
-                    instr_mask += mask_bit
-                mask_bit *= 2
-            resources.append(instr_mask)
-
-        recurrent_paths = []
-        paths   = [ [i]  for i in start_instrs]
-        visited = { i:[] for i in range(self.n)}
-
-        while paths:
-            path = paths.pop()
-            last = path[-1]
-            for dep in self.dependency_graph[last]:
-                if dep not in visited[last]:
-                    paths.append(path+[dep])
-                    visited[last].append(dep)
-                else:
-                    if len(set(path)) != len(path):
-                        path = path[path.index(last):]
-                        if path not in recurrent_paths:
-                            recurrent_paths.append(path)
-
-        max_latency = 0
-        for path in recurrent_paths:
-            latency = sum(latencies[i] for i in path[:-1])
-            iters = sum(a >= b for a,b in zip(path[:-1], path[1:]))
-            latency_iter = latency / iters
-            if latency_iter > max_latency:
-                max_latency = latency_iter
-
-        out  = "###################################################################################\n"
-        out += " **** Static Analysis of Performance Limits due to Recurrent Data Dependences ***\n\n"
-        out += f"  Latency-limit is {max_latency:0.2f} cycles/iteration\n\n"
-        for path in recurrent_paths:
-            latency = sum(latencies[i] for i in path[:-1])
-            iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
-            latency_iter = latency / iters
-
-            if latency_iter == max_latency:
-              out += f"\033[95m  Critical "
-            else:
-              out += f"  Recurrent "
-
-            out += f"path: "
-            for i in path[:-1]:
-                out += f"[{i}]{self.instructions[i][1].HLdescrp} "
-                out += f"({latencies[i]} cycles) -> "
-
-            out += f"[{path[-1]}]{self.instructions[path[-1]][1].HLdescrp}\n"
-
-            out += f"      Total cycles = "
-            if len(path)>2:
-              for i in path[:-2]:
-                out += f"{latencies[i]}+"
-              out += f"{latencies[path[-2]]} = "
-
-            out += f"{latency}  Total Iterations= {iters}\n\n"
- 
-            if latency_iter == max_latency:
-                out += f"\033[0m"
-
-        out += f" **** Static Analysis of Dispatch/Execute/Retire Bottlenecks ****\n"
-        out += f"  Resources  \t Cycles/iter.\n"
-        out += f"  ---------  \t-------------\n"
-
-        dw_cycles = self.n / self.processor.stages["dispatch"]
-        xw_cycles = self.n / self.processor.stages["execute"]
-        rw_cycles = self.n / self.processor.stages["retire"]
-
-        # generate all combinations of ports
-        n_combinations = 1
-        for i in range(n_ports):
-            n_combinations *= 2
-       
-        port_cycles = 0 
-        for mask in range(1,n_combinations):
-            uses = 0
-            for instr_mask in resources: 
-                if (mask & instr_mask) == instr_mask:
-                     uses += 1
-            cycles = uses / bin(mask).count("1")
-            if port_cycles < cycles:
-                port_cycles = cycles
-
-        max_cycles = max(port_cycles,dw_cycles, xw_cycles, rw_cycles)
-
-        value_str = f"{dw_cycles:0.2f}" 
-        if dw_cycles == max_cycles:
-            out += f"\033[95m   dispatch \t{value_str:^13}\033[0m\n"
-        else:
-            out += f"   dispatch \t{value_str:^13}\n"
-
-        value_str = f"{xw_cycles:0.2f}" 
-        if xw_cycles == max_cycles:
-            out += f"\033[95m   execute  \t{value_str:^13}\033[0m\n"
-        else:
-            out += f"   execute  \t{value_str:^13}\n"
-
-        value_str = f"{rw_cycles:0.2f}" 
-        if rw_cycles == max_cycles:
-            out += f"\033[95m    retire  \t{value_str:^13}\033[0m\n"
-        else:
-            out += f"   retire  \t{value_str:^13}\n"
-
-        for mask in range(1,n_combinations):
-            uses = 0
-            for instr_mask in resources: 
-                if (mask & instr_mask) == instr_mask:
-                     uses += 1
-            cycles = uses / bin(mask).count("1")
-            if cycles > 0:
-                port_str = ""
-                mask_bit=1
-                for j in range(n_ports):
-                    if mask_bit & mask == mask_bit:
-                        port_str += f"{ports[j]} "
-                    mask_bit *= 2
-
-                value_str = f"{cycles:0.2f}" 
-                if cycles == max_cycles:
-                   out += f"\033[95m    {port_str:^9}\t{value_str:^13}\033[0m\n"
-                else:
-                   out += f"    {port_str:^9}\t{value_str:^13}\n"
-        
-        perf_bound= f"LATENCY-BOUND"
-        if (max_latency > max_cycles):
-            max_cycles= max_latency
-        elif (max_latency < max_cycles):
-            perf_bound= f"THROUGHPUT-BOUND"
-        else:
-            perf_bound += f" and THROUGHPUT-BOUND"
-
-        out += f"\n Performance is {perf_bound}: {max_cycles:0.2f} cycles per iteration\n\n"
-        out += "##################################################################################\n\n"
-        return out
-
-
-
     def get_recurrent_paths_graphviz(self) -> str:
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
         start_instrs = []
@@ -500,11 +271,10 @@ class Program:
 
         out = "digraph {\n"
 
-
         for iter_idx in range(1, max_iters+1):
             for ins_idx, instruction in self.instructions:
 
-                out += f"iter{iter_idx}ins{ins_idx} [label=\"{instruction.HLdescrp}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
+                out += f"iter{iter_idx}ins{ins_idx} [label=\"{ins_idx}:{instruction.HLdescrp}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
 
                 for rs, i_d in self.dependencies[ins_idx].items():
                     reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
@@ -539,156 +309,6 @@ class Program:
                         out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\", color={curr_color}];\n"
 
         return out + "}\n"
-
-
-
-    def show_dependencies(self) -> str:
-        out = "··············· Program Description with Instruction Data-Dependences ························"
-        for i, instruction in self.instructions:
-
-            out += f"\n{i:{len(str(self.n))}}: "
-
-            if instruction.HLdescrp != "":
-                out += f"{instruction.HLdescrp:{self.pad}}: "
-            else:
-                out += f"{instruction}: "
-
-            out += f"{instruction.action:32}: "
-
-            for rs, i_d in self.dependencies[i].items():
-                reg   = eval(f"self.instructions[{i}][1].{rs}")
-                if i_d >= i:
-                  out += f"<b>"
-
-                out += f"{i_d} --> {reg}; "
-
-                if i_d >= i:
-                  out += f"</b>"
-
-        out += "\n······························································································\n\n"
-        return out
-
-
-
-    def get_dependencies_grapviz(self, num_iters=5) -> str:
-
-        # ----- BEGIN GET LONGEST PATH -----
-        n = self.n
-        start_instrs   = []
-        latencies      = []
-        critical_paths = []
-        dep_graph      = { i:[] for i in range(n*num_iters)}
-
-        for i in range(n):
-            if all(i <= j for j in self.dependencies[i].values()):
-                start_instrs.append(i)
-
-            for dep in self.dependencies[i].values():
-               if dep >= i:
-                   # i depends on instruction (dep) in previous loop iteration (loop-carried)
-                   for q in range(num_iters-1):  # do not insert dependence on last loop iteration
-                      dep_graph[dep+q*n].append(i+(q+1)*n)
-               else:
-                   # i depends on instruction (dep) in current loop iteration (not loop-carried)
-                   for q in range(num_iters):  # insert dependence on all loop iterations
-                      dep_graph[dep+q*n].append(i+q*n)
-
-            resource = self.processor.get_resource(self.instructions[i][1].type)
-            if not resource:
-                latency = 1
-            else:
-                latency = resource[0]
-            latencies.append(latency)
-
-        max_latency = 0
-        paths = [ [i] for i in start_instrs]  # instructions that do not depend on previous instructions
-        while paths:
-            path = paths.pop()
-            last = path[-1]
-            if not dep_graph[last]: # end of graph
-                latency = sum(latencies[i%n] for i in path)
-                if latency > max_latency:
-                    max_latency = latency
-                    critical_paths = [path]
-                if latency == max_latency:
-                    critical_paths.append(path)
-            else:
-                for dep in dep_graph[last]:
-                    paths.append ( path + [dep] )
-
-        longest_path = critical_paths[0]
-
-        print(f"Longest path: {longest_path}")
-
-        # ----- END GET LONGEST PATH -----
-
-
-        # ----- BEGIN GRAPHVIZ -----
-
-        colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
-        out = "digraph {\n"
-
-        for iter_idx in range(num_iters):
-            for ins_idx, instruction in self.instructions:
-                out += f"iter{iter_idx}ins{ins_idx} [label=\"{instruction.HLdescrp}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
-
-                for rs, i_d in self.dependencies[ins_idx].items():
-                    reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
-
-                    is_in_longest_path = False
-                    for idx, i in enumerate(longest_path[:-1]):
-                        if iter_idx == 0 and i_d == i and ins_idx == longest_path[idx+1]:
-                            print(f"Found {i_d} -> {ins_idx}")
-                            is_in_longest_path = True
-                            break
-
-
-                        dep_ins_longest_path_idx = self.n*iter_idx + i_d
-
-                        if i_d >= ins_idx:
-                            curr_ins_longest_path_idx = self.n*(iter_idx+1) + ins_idx
-                        else:
-                            curr_ins_longest_path_idx = self.n*iter_idx + ins_idx
-
-                        print(f"Checking {i_d} -> {ins_idx}. Curr path {i} -> {longest_path[idx+1]}")
-                        if dep_ins_longest_path_idx == (i) and curr_ins_longest_path_idx == (longest_path[idx+1]):
-                            print(f"Found {dep_ins_longest_path_idx} (iter={iter_idx}, ins={i_d}) -> {curr_ins_longest_path_idx} (iter={iter_idx}, ins={ins_idx})")
-                            is_in_longest_path = True
-                            break
-
-                    longest_path_str = ", color=red" if is_in_longest_path else ""
-
-                    if i_d >= ins_idx:
-                        out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx+1}ins{ins_idx}[label=\"{reg}\", penwidth=2.0 {longest_path_str}];\n"
-                    else:
-                        out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\" {longest_path_str}];\n"
-
-        # Define nodes for the iteration after the last one
-        for ins_idx, instruction in self.instructions:
-            # Only if the instructions are part of a recurrent path
-            p = False
-            for rs, i_d in self.dependencies[ins_idx].items():
-                if i_d >= ins_idx:
-                    p = True
-            if p:
-                out += f"iter{num_iters}ins{ins_idx} [label=\"{instruction.HLdescrp}\", shape=\"box\"];\n"
-        out += "}\n"
-        out = out.replace('<--', '←')
-        return out
-
-
-
-    def annotate_action(self) -> str:
-        out = "············· Program Description with Register-Level Transfer Language ······················"
-        for i, instruction in self.instructions:
-            out += f"\n{i:{len(str(self.n))}}: "
-            if instruction.HLdescrp != "":
-                out += f"{instruction.HLdescrp:{self.pad}}: "
-            out += f"{instruction}: {instruction.action:32}"
-            if instruction.LLdescrp != "":
-                out += f": {instruction.LLdescrp:16}"
-        out += "\n······························································································\n\n"
-        return out
 
 
 
@@ -744,7 +364,6 @@ class Program:
                 max_latency = latency_iter
 
         dw_cycles = self.n / self.processor.stages["dispatch"]
-        xw_cycles = self.n / self.processor.stages["execute"]
         rw_cycles = self.n / self.processor.stages["retire"]
 
         # generate all combinations of ports
@@ -762,17 +381,21 @@ class Program:
             if port_cycles < cycles:
                 port_cycles = cycles
 
-        max_cycles = max(port_cycles,dw_cycles, xw_cycles, rw_cycles)
+        max_cycles = max(port_cycles, dw_cycles, rw_cycles)
 
-        out = f"\n  Throughput-limit is {max_cycles:0.2f} cycles/iteration\n"
+        if (max_latency > max_cycles):
+            perf_bound= "LATENCY-BOUND"
+        elif (max_latency < max_cycles):
+            perf_bound= "THROUGHPUT-BOUND"
+        else:
+            perf_bound= "LATENCY- and THROUGHPUT-BOUND"
+        out = f"Performance is {perf_bound}\n"
+
+        out += f"\n Throughput-limit is {max_cycles:0.2f} cycles/iteration\n"
 
         value_str = f"{dw_cycles:0.2f}"
         if dw_cycles == max_cycles:
             out += f"   dispatch \t{value_str:^13}\n"
-
-        value_str = f"{xw_cycles:0.2f}"
-        if xw_cycles == max_cycles:
-            out += f"   execute  \t{value_str:^13}\n"
 
         value_str = f"{rw_cycles:0.2f}"
         if rw_cycles == max_cycles:
@@ -795,7 +418,7 @@ class Program:
                 value_str = f"{cycles:0.2f}"
                 out += f"    {port_str[:-1]:^9}\t{value_str:^13}\n"
 
-        out += f"\n  Latency-limit is {max_latency:0.2f} cycles/iteration\n"
+        out += f"\n Latency-limit is {max_latency:0.2f} cycles/iteration\n"
         for path in recurrent_paths:
             latency = sum(latencies[i] for i in path[:-1])
             iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
@@ -804,22 +427,13 @@ class Program:
             if latency_iter == max_latency:
                 out += "    "
                 for i in path[:-1]:
-                    out += f"[{i}]({latencies[i]})-->"
+                    out += f"[{i}] ({latencies[i]}) --> "
                 out += f"[{path[-1]}] : "
                 out += f"("
                 if len(path)>2:
                   for i in path[:-2]:
                     out += f"{latencies[i]}+"
                 out += f"{latencies[path[-2]]})cycles / {iters} iter. = {latency_iter}\n"
-
-        perf_bound= f"LATENCY-BOUND"
-        if (max_latency > max_cycles):
-            max_cycles= max_latency
-        elif (max_latency < max_cycles):
-            perf_bound= f"THROUGHPUT-BOUND"
-        else:
-            perf_bound += f" and THROUGHPUT-BOUND"
-        out += f"\n Performance is {perf_bound}\n"
 
         return out
 
