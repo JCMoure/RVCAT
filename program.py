@@ -274,7 +274,7 @@ class Program:
         for iter_idx in range(1, max_iters+1):
             for ins_idx, instruction in self.instructions:
 
-                out += f"iter{iter_idx}ins{ins_idx} [label=\"{ins_idx}:{instruction.HLdescrp}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
+                out += f"iter{iter_idx}ins{ins_idx} [label=\"{ins_idx}:{instruction.HLdescrp}-{instruction.type}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
 
                 for rs, i_d in self.dependencies[ins_idx].items():
                     reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
@@ -399,7 +399,7 @@ class Program:
            tot = tot+1
 
         if rw_cycles == max_cycles:
-           if (tot == 0):
+           if (tot != 0):
               out += ", "
            tot = tot+1
            out += f"retire stage"
@@ -411,7 +411,7 @@ class Program:
                      uses += 1
             cycles = uses / bin(mask).count("1")
             if cycles == max_cycles:
-                if (tot == 0):
+                if (tot != 0):
                   out += ", "
                 tot = tot+1
                 port_str = ""
@@ -423,14 +423,14 @@ class Program:
 
                 out += f"{port_str[:-1]}"
 
-        out += f")\n Latency-limit is {max_latency:0.2f} cycles/iteration\n"
+        out += f")\n Latency-limit is {max_latency:0.2f} cycles/iteration:\n"
         for path in recurrent_paths:
             latency = sum(latencies[i] for i in path[:-1])
             iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
             latency_iter = latency / iters
 
             if latency_iter == max_latency:
-                out += "    "
+                out += " Ciclic Dependence Path: "
                 for i in path[:-1]:
                     out += f"[{i}] ({latencies[i]}) --> "
                 out += f"[{path[-1]}] : "
