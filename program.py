@@ -391,15 +391,18 @@ class Program:
             perf_bound= "LATENCY- and THROUGHPUT-BOUND"
         out = f"Performance is {perf_bound}\n"
 
-        out += f"\n Throughput-limit is {max_cycles:0.2f} cycles/iteration\n"
+        out += f"\n Throughput-limit is {max_cycles:0.2f} cycles/iteration ("
 
-        value_str = f"{dw_cycles:0.2f}"
+        tot=0;
         if dw_cycles == max_cycles:
-            out += f"   dispatch \t{value_str:^13}\n"
+           out += f"dispatch stage"
+           tot = tot+1
 
-        value_str = f"{rw_cycles:0.2f}"
         if rw_cycles == max_cycles:
-            out += f"   retire  \t{value_str:^13}\n"
+           if (tot == 0):
+              out += ", "
+           tot = tot+1
+           out += f"retire stage"
 
         for mask in range(1,n_combinations):
             uses = 0
@@ -408,6 +411,9 @@ class Program:
                      uses += 1
             cycles = uses / bin(mask).count("1")
             if cycles == max_cycles:
+                if (tot == 0):
+                  out += ", "
+                tot = tot+1
                 port_str = ""
                 mask_bit=1
                 for j in range(n_ports):
@@ -415,10 +421,9 @@ class Program:
                         port_str += f"P{ports[j]}+"
                     mask_bit *= 2
 
-                value_str = f"{cycles:0.2f}"
-                out += f"    {port_str[:-1]:^9}\t{value_str:^13}\n"
+                out += f"{port_str[:-1]}"
 
-        out += f"\n Latency-limit is {max_latency:0.2f} cycles/iteration\n"
+        out += f")\n Latency-limit is {max_latency:0.2f} cycles/iteration\n"
         for path in recurrent_paths:
             latency = sum(latencies[i] for i in path[:-1])
             iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
