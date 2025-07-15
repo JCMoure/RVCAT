@@ -74,7 +74,7 @@ class Program:
 
 
     def load_program(self, file="") -> None:
-        if(file!=""):
+        if (file!=""):
             parser   = Parser()
 
             if file:
@@ -845,20 +845,17 @@ class Program:
               out += f"P{ports[i]},"
 
             out += f"P{ports[n-1]}\n"
+        
+        return out
 
-        out += self.show_small_perf_analysis()
 
+    def show_instruction_memory_trace(self) -> str:
+        out = ""
         if self.processor.nBlocks > 0:
-            out += f"\n CACHE  Blocks={self.processor.nBlocks}  "
-            out += f"BlkSize={self.processor.blkSize}  "
-            out += f"MissPenalty={self.processor.mPenalty}  "
-            out += f"MissIssueTime={self.processor.mIssueTime}\n\n"
-
             for i, instruction in self.instructions:
                 if instruction.memory != MemType.NONE:
                     out += f"{i:{len(str(self.n))}}: {instruction.type:12}"
                     out += f" Init_ADDR={instruction.addr:4} Stride={instruction.stride:2} N={instruction.N:3}\n"
-
         return out
 
 
