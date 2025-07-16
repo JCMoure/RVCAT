@@ -293,7 +293,8 @@ class Program:
                 mask_bit *= 2
             resources.append(instr_mask)
 
-         return resources
+        return resources
+
 
 
     def get_recurrent_paths_graphviz(self) -> str:
@@ -301,7 +302,7 @@ class Program:
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
 
         recurrent_paths = self.get_cyclic_paths()
-        latencies       = self.get_instr_latencies()
+        # latencies       = self.get_instr_latencies()
 
         # Get the maximum number of loop iterations on any cyclic path
         max_iters = 0
@@ -319,9 +320,10 @@ class Program:
 
         for iter_idx in range(1, max_iters+1):
             for ins_idx, instruction in self.instructions:
-
+                #lat = latencies[ins_idx]
+                lat = 0
                 out += f"iter{iter_idx}ins{ins_idx} "
-                out += f"[label=\"{ins_idx}:{instruction.HLdescrp}\n{latencies[ins_idx]} {instruction.type}\", "
+                out += f"[label=\"{ins_idx}:{instruction.HLdescrp}\n{lat} {instruction.type}\", "
                 out += f"shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
                 
                 for rs, i_d in self.dependencies[ins_idx].items():
@@ -411,7 +413,7 @@ class Program:
             perf_bound= "THROUGHPUT-BOUND"
         else:
             perf_bound= "LATENCY- and THROUGHPUT-BOUND"
-        out = f"Performance is {perf_bound} and minimum execution time is {cycles_limit:0.2f} cycles per loop iteration\n"
+        out  = f"Performance is {perf_bound} and minimum execution time is {cycles_limit:0.2f} cycles per loop iteration\n"
         out += f" Throughput-limit is {max_cycles:0.2f} cycles/iteration\n"
         out += f"  Latency-limit   is {max_latency:0.2f} cycles/iteration\n"
         out += f"\n*** Throughput ********\n"
