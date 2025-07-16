@@ -227,15 +227,15 @@ class Program:
         return DependenceEdges
 
 
-    def get_recurrent_paths_graphviz(self) -> str:
-        colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
-        start_instrs = []
+    def generate_cyclic_paths (self): -> list 
+        # result is a list with all the cyclic paths in the format of [[3, 3], [2, 0, 2]], where numbers are instruction id's
 
+        start_instrs = []  # list of instructions not depending on previous instructions on the code loop
         for i in range(self.n):
             if all(i <= j for j in self.dependencies[i].values()):
                 start_instrs.append(i)
 
-        recurrent_paths = []
+        cyclic_paths = []
         paths   = [ [i]  for i in start_instrs]
         visited = { i:[] for i in range(self.n)}
 
@@ -249,12 +249,15 @@ class Program:
                 else:
                     if len(set(path)) != len(path):
                         path = path[path.index(last):]
-                        if path not in recurrent_paths:
-                            recurrent_paths.append(path)
+                        if path not in cyclic_paths:
+                            cyclic_paths.append(path)
+        return cyclic_paths 
 
-        # In recurrent paths we get all the critical paths in the format of [[3,
-        # 3], [2, 0, 2]], where the numbers are the instructions.
 
+    def get_recurrent_paths_graphviz(self) -> str:
+        colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
+        recurrent_paths = generate_cyclic_paths()
+        
         # Get the number of iterations to show the recurrent paths
         max_iters = 0
         for path in recurrent_paths:
@@ -307,12 +310,10 @@ class Program:
                         pass
                     else:
                         out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\", color={curr_color}];\n"
-
         return out + "}\n"
 
 
-
-    def show_small_perf_analysis(self) -> str:
+    def show_performance_analysis(self) -> str:
 
         ports        = list( self.processor.ports.keys() )
         n_ports      = len ( ports )
