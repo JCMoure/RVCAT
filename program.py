@@ -227,17 +227,21 @@ class Program:
         return DependenceEdges
 
 
-    def get_recurrent_paths_graphviz(self) -> str:
-        colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
+
+    def get_cyclic_paths(self) -> list:
+        
+        # return list of cyclic dependence paths: [[3, 3], [2, 0, 2]], 
+        #numbers are instr-IDs: same ID appears at begin & end
+
         start_instrs = []
 
         for i in range(self.n):
             if all(i <= j for j in self.dependencies[i].values()):
                 start_instrs.append(i)
 
-        recurrent_paths = []
-        paths   = [ [i]  for i in start_instrs]
-        visited = { i:[] for i in range(self.n)}
+        cyclic_paths = []
+        paths        = [ [i]  for i in start_instrs]
+        visited       = { i:[] for i in range(self.n)}
 
         while paths:
             path = paths.pop()
@@ -249,16 +253,22 @@ class Program:
                 else:
                     if len(set(path)) != len(path):
                         path = path[path.index(last):]
-                        if path not in recurrent_paths:
-                            recurrent_paths.append(path)
+                        if path not in cyclic_paths:
+                            cyclic_paths.append(path)
 
-        # In recurrent paths we get all the critical paths in the format of [[3,
-        # 3], [2, 0, 2]], where the numbers are the instructions.
+        return cyclic_paths  
 
-        # Get the number of iterations to show the recurrent paths
+
+    def get_recurrent_paths_graphviz(self) -> str:
+
+        colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
+
+        recurrent_paths = self.get_cyclic_paths()
+
+        # Get the maximum number of loop iterations on any cyclic path
         max_iters = 0
         for path in recurrent_paths:
-            print(f'Curr path: {path}')
+            # print(f'Curr path: {path}')
             curr_instr = path[0]
             local_max_iters = 0
             for instr in path[1:]:
@@ -267,7 +277,7 @@ class Program:
                 curr_instr = instr
             if local_max_iters > max_iters:
                 max_iters = local_max_iters
-            print(f'Local max iters: {local_max_iters}')
+            # print(f'Local max iters: {local_max_iters}')
 
         out = "digraph {\n"
 
@@ -278,11 +288,15 @@ class Program:
 
                 for rs, i_d in self.dependencies[ins_idx].items():
                     reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
+              
                     # True if it's the first or last instruction of an iteration path
                     is_border = i_d >= ins_idx
+                    
                     # In this case, the next instruction depends on the output of the current instr
                     # Check if the current path is part of a critical path
+                    
                     is_recurrent = False
+                    
                     for path in recurrent_paths:
                         curr = path[0]
                         next = path[1]
