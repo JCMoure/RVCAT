@@ -383,17 +383,18 @@ class Program:
 
         max_cycles = max(port_cycles, dw_cycles, rw_cycles)
 
+        cycles_limit = max_cycles
         if (max_latency > max_cycles):
             perf_bound= "LATENCY-BOUND"
+            cycles_limit = max_latency
         elif (max_latency < max_cycles):
             perf_bound= "THROUGHPUT-BOUND"
         else:
             perf_bound= "LATENCY- and THROUGHPUT-BOUND"
-        out = f"Performance is {perf_bound}\n"
-
+        out = f"Performance is {perf_bound} and minimum execution time is {cycles_limit:0.2f} cycles per loop iteration\n"
         out += f" Throughput-limit is {max_cycles:0.2f} cycles/iteration\n"
         out += f"  Latency-limit   is {max_latency:0.2f} cycles/iteration\n"
-        out += f"\n ** Throughput ********\n"
+        out += f"\n*** Throughput ********\n"
 
         tot=0;
         if dw_cycles == max_cycles:
@@ -425,8 +426,8 @@ class Program:
 
                 out += f"{port_str[:-1]}"
 
-        out += f")\n\n"
-        out += f" ** Cycli Dependence Paths:\n"
+        out += f"\n\n"
+        out += f"*** Cyclic Dependence Paths:\n"
         for path in recurrent_paths:
             latency = sum(latencies[i] for i in path[:-1])
             iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
