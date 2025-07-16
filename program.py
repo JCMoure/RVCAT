@@ -259,16 +259,53 @@ class Program:
         return cyclic_paths  
 
 
+    def get_instr_latencies(self) -> list:
+        # return list of latencies for ordered list of instructions
+        
+        latencies = []
+
+        for i in range(self.n):
+            resource = self.processor.get_resource(self.instructions[i][1].type)
+            if not resource:
+                latency = 1
+            else:
+                latency = resource[0]
+            latencies.append(latency)
+    
+        return latencies
+
+
+
+    def get_instr_ports (self) -> list:
+        # return list of port_usage masks for ordered list of instructions
+ 
+        ports        = list( self.processor.ports.keys() )
+        n_ports      = len ( ports )
+        resources    = []
+
+        for i in range(self.n):
+            resource   = self.processor.get_resource(self.instructions[i][1].type)
+            instr_mask = 0
+            mask_bit   = 1
+            for j in range(n_ports):
+                if ports[j] in resource[1]:
+                    instr_mask += mask_bit
+                mask_bit *= 2
+            resources.append(instr_mask)
+
+         return resources
+
+
     def get_recurrent_paths_graphviz(self) -> str:
 
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
 
         recurrent_paths = self.get_cyclic_paths()
+        latencies       = self.get_instr_latencies()
 
         # Get the maximum number of loop iterations on any cyclic path
         max_iters = 0
         for path in recurrent_paths:
-            # print(f'Curr path: {path}')
             curr_instr = path[0]
             local_max_iters = 0
             for instr in path[1:]:
@@ -277,15 +314,16 @@ class Program:
                 curr_instr = instr
             if local_max_iters > max_iters:
                 max_iters = local_max_iters
-            # print(f'Local max iters: {local_max_iters}')
 
         out = "digraph {\n"
 
         for iter_idx in range(1, max_iters+1):
             for ins_idx, instruction in self.instructions:
 
-                out += f"iter{iter_idx}ins{ins_idx} [label=\"{ins_idx}:{instruction.HLdescrp}\n{instruction.type}\", shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
-
+                out += f"iter{iter_idx}ins{ins_idx} "
+                out += f"[label=\"{ins_idx}:{instruction.HLdescrp}\n{latencies[ins_idx]} {instruction.type}\", "
+                out += f"shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
+                
                 for rs, i_d in self.dependencies[ins_idx].items():
                     reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
               
@@ -313,10 +351,12 @@ class Program:
 
                     curr_color = "red" if is_recurrent else "black"
                     if is_border:
-                        out += f"iter{iter_idx-1}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\", color={curr_color}, penwidth=2.0];\n"
+                        out += f"iter{iter_idx-1}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\", "
+                        out += f"color={curr_color}, penwidth=2.0];\n"
                         out += f"iter{iter_idx-1}ins{i_d} {'[style=invis]' if iter_idx == 1 else ''};\n"
                         if iter_idx == max_iters:
-                            out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx+1}ins{ins_idx}[label=\"{reg}\", color={curr_color}, penwidth=2.0];\n"
+                            out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx+1}ins{ins_idx}[label=\"{reg}\", "
+                            out += f"color={curr_color}, penwidth=2.0];\n"
                             out += f"iter{iter_idx+1}ins{ins_idx} {'[style=invis]' if iter_idx == max_iters else ''};\n"
                         pass
                     else:
@@ -328,51 +368,17 @@ class Program:
 
     def show_performance_analysis(self) -> str:
 
-        ports        = list( self.processor.ports.keys() )
-        n_ports      = len ( ports )
-        start_instrs = []
-        latencies    = []
-        resources    = []
+        ports    = list( self.processor.ports.keys() )
+        n_ports  = len ( ports )
 
-        for i in range(self.n):
-            if all(i <= j for j in self.dependencies[i].values()):
-                start_instrs.append(i)
-
-            resource = self.processor.get_resource(self.instructions[i][1].type)
-            if not resource:
-                latency = 1
-            else:
-                latency = resource[0]
-            latencies.append(latency)
-            instr_mask=0
-            mask_bit=1
-            for j in range(n_ports):
-                if ports[j] in resource[1]:
-                    instr_mask += mask_bit
-                mask_bit *= 2
-            resources.append(instr_mask)
-
-        recurrent_paths = []
-        paths   = [ [i]  for i in start_instrs]
-        visited = { i:[] for i in range(self.n)}
-
-        while paths:
-            path = paths.pop()
-            last = path[-1]
-            for dep in self.dependency_graph[last]:
-                if dep not in visited[last]:
-                    paths.append(path+[dep])
-                    visited[last].append(dep)
-                else:
-                    if len(set(path)) != len(path):
-                        path = path[path.index(last):]
-                        if path not in recurrent_paths:
-                            recurrent_paths.append(path)
+        recurrent_paths = self.get_cyclic_paths()
+        latencies       = self.get_instr_latencies()
+        resources       = self.get_instr_ports()
 
         max_latency = 0
         for path in recurrent_paths:
             latency = sum(latencies[i] for i in path[:-1])
-            iters = sum(a >= b for a,b in zip(path[:-1], path[1:]))
+            iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
             latency_iter = latency / iters
             if latency_iter > max_latency:
                 max_latency = latency_iter
