@@ -254,7 +254,7 @@ class Program:
         return cyclic_paths 
 
 
-    def get_recurrent_paths_graphviz(self) -> str:
+    def recurrent_paths_graphviz(self) -> str:
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
         recurrent_paths = generate_cyclic_paths()
         
@@ -448,7 +448,7 @@ class Program:
         return out
 
 
-    def annotate_execution(self) -> str:
+    def show_program (self) -> str:
         InsMessage = "INSTRUCTIONS"
         out = f"   {InsMessage:{self.pad}}     TYPE      LATENCY  EXECUTION PORTS\n"
         for i, instruction in self.instructions:
