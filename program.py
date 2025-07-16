@@ -227,40 +227,10 @@ class Program:
         return DependenceEdges
 
 
-    def generate_cyclic_paths (self): -> list 
-        # result is a list with all the cyclic paths in the format of [[3, 3], [2, 0, 2]], where numbers are instruction id's
-
-        start_instrs = []  # list of instructions not depending on previous instructions on the code loop
-        for i in range(self.n):
-            if all(i <= j for j in self.dependencies[i].values()):
-                start_instrs.append(i)
-
-        cyclic_paths = []
-        paths   = [ [i]  for i in start_instrs]
-        visited = { i:[] for i in range(self.n)}
-
-        while paths:
-            path = paths.pop()
-            last = path[-1]
-            for dep in self.dependency_graph[last]:
-                if dep not in visited[last]:
-                    paths.append(path+[dep])
-                    visited[last].append(dep)
-                else:
-                    if len(set(path)) != len(path):
-                        path = path[path.index(last):]
-                        if path not in cyclic_paths:
-                            cyclic_paths.append(path)
-        return cyclic_paths 
-
-
-    def recurrent_paths_graphviz(self) -> str:
+    def get_recurrent_paths_graphviz(self) -> str:
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
-        
-        # recurrent_paths = self.generate_cyclic_paths()
-        
+        start_instrs = []
 
-        start_instrs = []  # list of instructions not depending on previous instructions on the code loop
         for i in range(self.n):
             if all(i <= j for j in self.dependencies[i].values()):
                 start_instrs.append(i)
@@ -282,6 +252,8 @@ class Program:
                         if path not in recurrent_paths:
                             recurrent_paths.append(path)
 
+        # In recurrent paths we get all the critical paths in the format of [[3,
+        # 3], [2, 0, 2]], where the numbers are the instructions.
 
         # Get the number of iterations to show the recurrent paths
         max_iters = 0
@@ -297,7 +269,6 @@ class Program:
                 max_iters = local_max_iters
             print(f'Local max iters: {local_max_iters}')
 
-
         out = "digraph {\n"
 
         for iter_idx in range(1, max_iters+1):
@@ -307,14 +278,11 @@ class Program:
 
                 for rs, i_d in self.dependencies[ins_idx].items():
                     reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
-
                     # True if it's the first or last instruction of an iteration path
                     is_border = i_d >= ins_idx
-                    
                     # In this case, the next instruction depends on the output of the current instr
                     # Check if the current path is part of a critical path
                     is_recurrent = False
-                    
                     for path in recurrent_paths:
                         curr = path[0]
                         next = path[1]
@@ -339,10 +307,12 @@ class Program:
                         pass
                     else:
                         out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\", color={curr_color}];\n"
+
         return out + "}\n"
 
 
-    def show_performance_analysis(self) -> str:
+
+    def show_small_perf_analysis(self) -> str:
 
         ports        = list( self.processor.ports.keys() )
         n_ports      = len ( ports )
@@ -477,7 +447,7 @@ class Program:
         return out
 
 
-    def show_program (self) -> str:
+    def annotate_execution(self) -> str:
         InsMessage = "INSTRUCTIONS"
         out = f"   {InsMessage:{self.pad}}     TYPE      LATENCY  EXECUTION PORTS\n"
         for i, instruction in self.instructions:
