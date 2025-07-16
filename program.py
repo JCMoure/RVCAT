@@ -256,7 +256,7 @@ class Program:
 
     def recurrent_paths_graphviz(self) -> str:
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
-        recurrent_paths = generate_cyclic_paths()
+        recurrent_paths = self.generate_cyclic_paths()
         
         # Get the number of iterations to show the recurrent paths
         max_iters = 0
