@@ -312,7 +312,7 @@ class Program:
 
 
 
-    def show_small_perf_analysis(self) -> str:
+    def show_performance_analysis(self) -> str:
 
         ports        = list( self.processor.ports.keys() )
         n_ports      = len ( ports )
@@ -447,7 +447,7 @@ class Program:
         return out
 
 
-    def annotate_execution(self) -> str:
+    def show_code(self) -> str:
         InsMessage = "INSTRUCTIONS"
         out = f"   {InsMessage:{self.pad}}     TYPE      LATENCY  EXECUTION PORTS\n"
         for i, instruction in self.instructions:
