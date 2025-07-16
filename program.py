@@ -302,7 +302,7 @@ class Program:
         colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
 
         recurrent_paths = self.get_cyclic_paths()
-        # latencies       = self.get_instr_latencies()
+        latencies       = self.get_instr_latencies()
 
         # Get the maximum number of loop iterations on any cyclic path
         max_iters = 0
@@ -320,10 +320,9 @@ class Program:
 
         for iter_idx in range(1, max_iters+1):
             for ins_idx, instruction in self.instructions:
-                #lat = latencies[ins_idx]
-                lat = 0
+                lat = latencies[ins_idx]
                 out += f"iter{iter_idx}ins{ins_idx} "
-                out += f"[label=\"{ins_idx}:{instruction.HLdescrp}\n{lat} {instruction.type}\", "
+                out += f"[label=\"{ins_idx}:{instruction.HLdescrp}\n({lat}) {instruction.type}\", "
                 out += f"shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
                 
                 for rs, i_d in self.dependencies[ins_idx].items():
