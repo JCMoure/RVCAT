@@ -304,17 +304,18 @@ class Program:
         recurrent_paths = self.get_cyclic_paths()
         latencies       = self.get_instr_latencies()
 
-        # Get the maximum number of loop iterations on any cyclic path
-        max_iters = 0
+        max_latency    = 0   # maximum latency per iteration
+        max_iters      = 0   # maximum number of iterations for cyclic path
+        path_latencies = []  # latencies of cyclic paths
+
         for path in recurrent_paths:
-            curr_instr = path[0]
-            local_max_iters = 0
-            for instr in path[1:]:
-                if curr_instr >= instr:
-                    local_max_iters += 1
-                curr_instr = instr
-            if local_max_iters > max_iters:
-                max_iters = local_max_iters
+            latency = sum(latencies[i] for i in path[:-1])
+            iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
+            latency_iter = latency / iters
+            path_latencies.append(latency_iter)
+            if latency_iter > max_latency:
+                max_latency = latency_iter
+            max_iters = max( iters, max_iters )
 
         out = "digraph {\n"
 
