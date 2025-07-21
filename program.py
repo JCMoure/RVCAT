@@ -318,63 +318,66 @@ class Program:
             max_iters = max( iters, max_iters )
 
         out  = "digraph G {\n  rankdir=\"TB\"; splines=spline; newrank=true;\n"
-        out += "  edge [fontname=\"Consolas\"; fontsize=12; fontcolor=black];\n"
+        out += "  edge [fontname=\"Consolas\"; color=black; penwidth=1.0; "
+        out += "fontsize=12; fontcolor=blue];\n"
 
         for iter_idx in range(1, max_iters+1):
-            out += f"subgraph cluster_{iter_idx} "
-            out +=  "{\n style=\"filled,rounded\"; label= <<B>iteration "
-            out += f"{iter_idx}</B>>; "
-            out +=  "labeljust=\"l\"; color=blue; fontcolor=blue; fontsize=18; fontname=\"Consolas\"; "
-            out += f"fillcolor={colors[iter_idx-1]};\n"
-            out +=  "node [style=filled, shape=rectangle, fillcolor=lightgrey, fontname=\"Consolas\"; "
-            out`+=  "fontsize=12, margin=0.1];\n"
+            out += f" subgraph cluster_{iter_idx} "
+            out +=  "{\n  style=\"filled,rounded\"; label= <<B>iteration "
+            out += f"{iter_idx}</B>>; fontname=\"Consolas\";\n"
+            out +=  "  labeljust=\"l\"; color=blue; fontcolor=blue;\n"
+            out += f"  fontsize=21; fillcolor={colors[iter_idx-1]};\n"
+            out +=  "  node [style=filled, shape=rectangle, fillcolor=lightgrey,"
+            out +=  " fontname=\"Consolas\", fontsize=16, margin=0.0];\n"
 
             for ins_idx, instruction in self.instructions:
                 lat = latencies[ins_idx]
                 out += f"i{iter_idx}s{ins_idx} "
-                out += f"[label=<<B><FONT COLOR=\"red\">{lat}</FONT>  " 
-                out += f"{ins_idx}:{instruction.HLdescrp}</B>>];\n"
+                out += f"[xlabel=\"lat={lat}\", " 
+                out += f"[label=< <B>{ins_idx}:{instruction.HLdescrp}</B> >];\n"
             out +=  "}\n"
             
         for iter_idx in range(1, max_iters+1):
-            for ins_idx, instruction in self.instructions:
-                for rs, i_d in self.dependencies[ins_idx].items():
-                    reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
+          for ins_idx, instruction in self.instructions:
+            for rs, i_d in self.dependencies[ins_idx].items():
+              reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
               
-                    # True if it's the first or last instruction of an iteration path
-                    is_border = i_d >= ins_idx
+              # True if it's the first or last instruction of an iteration path
+              is_border = i_d >= ins_idx
                     
-                    # In this case, the next instruction depends on the output of the current instr
-                    # Check if the current path is part of a critical path
-                    
-                    is_recurrent = False
-                    
-                    for path in recurrent_paths:
-                        curr = path[0]
-                        next = path[1]
-                        if ins_idx == next and i_d == curr :
-                            is_recurrent = True
-                            break
-                        else:
-                            for i in range(len(path)-2):
-                                curr = next
-                                next = path[i+2]
-                                if next == ins_idx and curr == i_d:
-                                    is_recurrent = True
-                                    break
+              # Then, next instruction depends on output of current instr
+              
+              # Check if the current path is part of a critical path    
+              is_recurrent = False
+              for path in recurrent_paths:
+                curr = path[0]
+                next = path[1]
+                if ins_idx == next and i_d == curr :
+                  is_recurrent = True
+                  break
+                else:
+                  for i in range(len(path)-2):
+                    curr = next
+                    next = path[i+2]
+                    if next == ins_idx and curr == i_d:
+                      is_recurrent = True
+                      break
 
-                    curr_color = "red" if is_recurrent else "black"
-                    if is_border:
-                        out += f"i{iter_idx-1}s{i_d} -> i{iter_idx}s{ins_idx}[label=\" {reg}\", "
-                        out += f"color={curr_color}, penwidth=2.0];\n"
-                        out += f"i{iter_idx-1}s{i_d} {'[style=invis]' if iter_idx == 1 else ''};\n"
-                        if iter_idx == max_iters:
-                            out += f"i{iter_idx}s{i_d} -> i{iter_idx+1}s{ins_idx}[label=\" {reg}\", "
-                            out += f"color={curr_color}, penwidth=2.0];\n"
-                            out += f"i{iter_idx+1}s{ins_idx} {'[style=invis]' if iter_idx == max_iters else ''};\n"
-                        pass
-                    else:
-                        out += f"i{iter_idx}s{i_d} -> i{iter_idx}s{ins_idx}[label=\" {reg}\", color={curr_color}];\n"
+              curr_color = "red" if is_recurrent else "black"
+
+              if is_border:
+                if iter_idx == 1:
+                  out += f"i0s{i_d} [color=invis, label=\" {reg}\"];\n"
+                out += f"i{iter_idx-1}s{i_d} -> i{iter_idx}s{ins_idx}[label=\" {reg}\", "
+                out += f"color={curr_color}, penwidth=2.0];\n"
+
+                if iter_idx == max_iters:
+                  out += f"i{iter_idx+1}s{ins_idx} [color=invis, label=\" {reg}\"];\n"
+                out += f"i{iter_idx}s{i_d} -> i{iter_idx+1}s{ins_idx}[label=\" {reg}\", "
+                out += f"color={curr_color}, penwidth=2.0];\n"
+
+              else:
+                out += f"i{iter_idx}s{i_d} -> i{iter_idx}s{ins_idx}[label=\" {reg}\", color={curr_color}];\n"
 
         return out + "}\n"
 
