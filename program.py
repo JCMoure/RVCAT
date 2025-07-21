@@ -317,7 +317,9 @@ class Program:
                 max_latency = latency_iter
             max_iters = max( iters, max_iters )
 
-        out = "digraph {\n"
+        out = "digraph G {\nrankdir="TB";splines=spline;newrank=true;\n"
+        
+        out += "edge [fontname=\"Consolas\"; fontsize=12; fontcolor=black];"
 
         for iter_idx in range(1, max_iters+1):
             for ins_idx, instruction in self.instructions:
