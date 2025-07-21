@@ -317,23 +317,26 @@ class Program:
                 max_latency = latency_iter
             max_iters = max( iters, max_iters )
 
-        out  = "digraph G {\nrankdir=\"TB\";splines=spline;newrank=true;\n"
-        out += "edge [fontname=\"Consolas\"; fontsize=12; fontcolor=black];"
+        out  = "digraph G {\n  rankdir=\"TB\"; splines=spline; newrank=true;\n"
+        out += "  edge [fontname=\"Consolas\"; fontsize=12; fontcolor=black];\n"
 
         for iter_idx in range(1, max_iters+1):
-            out += f"subgraph c_{iter_idx} "
-            out +=  "{ style=\"filled,rounded\"; label= <<B>iteration #"
+            out += f"subgraph cluster_{iter_idx} "
+            out +=  "{\n style=\"filled,rounded\"; label= <<B>iteration "
             out += f"{iter_idx}</B>>; "
             out +=  "labeljust=\"l\"; color=blue; fontcolor=blue; fontsize=18; fontname=\"Consolas\"; "
-            # out +=  "fillcolor=lightgreen;\n"
             out += f"fillcolor={colors[iter_idx-1]};\n"
-            out +=  "node [style=filled, shape=rectangle, fillcolor=lightgrey, fontname=\"Helvetica-Bold\"];\n"
+            out +=  "node [style=filled, shape=rectangle, fillcolor=lightgrey, fontname=\"Consolas\"; "
+            out`+=  "fontsize=12, margin=0.1];\n"
+
             for ins_idx, instruction in self.instructions:
                 lat = latencies[ins_idx]
-                out += f"iter{iter_idx}ins{ins_idx} "
-                out += f"[label=\"{ins_idx}:{instruction.HLdescrp}\n( {lat} )\"];\n"
+                out += f"i{iter_idx}s{ins_idx} "
+                out += f"[label=<<B><FONT COLOR=\"red\">{lat}</FONT>  " 
+                out += f"{ins_idx}:{instruction.HLdescrp}</B>>];\n"
             out +=  "}\n"
             
+        for iter_idx in range(1, max_iters+1):
             for ins_idx, instruction in self.instructions:
                 for rs, i_d in self.dependencies[ins_idx].items():
                     reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
@@ -362,16 +365,16 @@ class Program:
 
                     curr_color = "red" if is_recurrent else "black"
                     if is_border:
-                        out += f"iter{iter_idx-1}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\", "
+                        out += f"i{iter_idx-1}s{i_d} -> i{iter_idx}s{ins_idx}[label=\" {reg}\", "
                         out += f"color={curr_color}, penwidth=2.0];\n"
-                        out += f"iter{iter_idx-1}ins{i_d} {'[style=invis]' if iter_idx == 1 else ''};\n"
+                        out += f"i{iter_idx-1}s{i_d} {'[style=invis]' if iter_idx == 1 else ''};\n"
                         if iter_idx == max_iters:
-                            out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx+1}ins{ins_idx}[label=\"{reg}\", "
+                            out += f"i{iter_idx}s{i_d} -> i{iter_idx+1}s{ins_idx}[label=\" {reg}\", "
                             out += f"color={curr_color}, penwidth=2.0];\n"
-                            out += f"iter{iter_idx+1}ins{ins_idx} {'[style=invis]' if iter_idx == max_iters else ''};\n"
+                            out += f"i{iter_idx+1}s{ins_idx} {'[style=invis]' if iter_idx == max_iters else ''};\n"
                         pass
                     else:
-                        out += f"iter{iter_idx}ins{i_d} -> iter{iter_idx}ins{ins_idx}[label=\"{reg}\", color={curr_color}];\n"
+                        out += f"i{iter_idx}s{i_d} -> i{iter_idx}s{ins_idx}[label=\" {reg}\", color={curr_color}];\n"
 
         return out + "}\n"
 
