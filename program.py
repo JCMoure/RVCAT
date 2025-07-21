@@ -317,17 +317,22 @@ class Program:
                 max_latency = latency_iter
             max_iters = max( iters, max_iters )
 
-        out = "digraph G {\nrankdir="TB";splines=spline;newrank=true;\n"
+        out = "digraph G {\nrankdir=\"TB\";splines=spline;newrank=true;\n"
         
         out += "edge [fontname=\"Consolas\"; fontsize=12; fontcolor=black];"
 
         for iter_idx in range(1, max_iters+1):
+            out += f"subgraph c_{iter_idx} \{ style=\"filled,rounded\"; label = <<B>iteration #{iter_idx}</B>>;"
+            out += f"labeljust=\"l\"; color=blue; fillcolor={colors[iter_idx-1]}; fontcolor=blue;"
+            out += f"fontsize=\"18\"; fontname=\"Consolas\";\n"
+            out += f"node [style=filled,shape=rectangle,fillcolor=lightgrey, fontname=\"Helvetica-Bold\"];"
             for ins_idx, instruction in self.instructions:
                 lat = latencies[ins_idx]
                 out += f"iter{iter_idx}ins{ins_idx} "
-                out += f"[label=\"{ins_idx}:{instruction.HLdescrp}\n({lat}) {instruction.type}\", "
-                out += f"shape=\"box\", color={colors[iter_idx%len(colors)]}, style=filled];\n"
-                
+                out += f"[label=\"{ins_idx}:{instruction.HLdescrp}\n( {lat} )\"];\n"
+            out += "}\n"
+            
+            for ins_idx, instruction in self.instructions:
                 for rs, i_d in self.dependencies[ins_idx].items():
                     reg   = eval(f"self.instructions[{ins_idx}][1].{rs}")
               
