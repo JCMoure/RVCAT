@@ -322,10 +322,11 @@ class Program:
 
         for iter_idx in range(1, max_iters+1):
             out += f"subgraph c_{iter_idx} "
-            out +=  "{ style=\"filled,rounded\"; label = <<B>iteration #"
-            out += f"{iter_idx}"
-            out +=  "</B>>; labeljust=\"l\"; color=blue; fontcolor=blue; fontsize=\"18\"; fontname=\"Consolas\";"
-            out += f"fillcolor={colors[iter_idx-1]}\n"
+            out +=  "{ style=\"filled,rounded\"; label= <<B>iteration #"
+            out += f"{iter_idx}</B>>; "
+            out +=  "labeljust=\"l\"; color=blue; fontcolor=blue; fontsize=18; fontname=\"Consolas\"; "
+            # out +=  "fillcolor=lightgreen;\n"
+            out += f"fillcolor={colors[iter_idx-1]};\n"
             out +=  "node [style=filled, shape=rectangle, fillcolor=lightgrey, fontname=\"Helvetica-Bold\"];\n"
             for ins_idx, instruction in self.instructions:
                 lat = latencies[ins_idx]
