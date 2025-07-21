@@ -173,7 +173,7 @@ class Program:
             if instr_1.format in [InstrFormat.UPPER_IMM, InstrFormat.JUMP]:
                 continue
 
-            ordered_instrs = self.instructions[:i_1][::-1]  + self.instructions[i_1:][::-1]
+            ordered_instrs = self.instructions[:i_1][::-1] + self.instructions[i_1:][::-1]
 
             for i_2, instr_2 in ordered_instrs:
                 if (instr_1.format == InstrFormat.IMM and len(instr_deps) == 1):
@@ -321,6 +321,7 @@ class Program:
         out += "  edge [fontname=\"Consolas\"; color=black; penwidth=1.0; "
         out += "fontsize=12; fontcolor=blue];\n"
 
+        # generate clusters of nodes: one cluster per loop iteration
         for iter_idx in range(1, max_iters+1):
             out += f" subgraph cluster_{iter_idx} "
             out +=  "{\n  style=\"filled,rounded\"; label= <<B>iteration "
@@ -333,20 +334,80 @@ class Program:
             for ins_idx, instruction in self.instructions:
                 lat = latencies[ins_idx]
                 out += f"i{iter_idx}s{ins_idx} "
-                out += f"[xlabel=\"lat={lat}\", " 
-                out += f"[label=< <B>{ins_idx}:{instruction.HLdescrp}</B> >];\n"
+                out += f"[xlabel=\"lat={lat} \", " 
+                out += f"label=< <B>{ins_idx}:{instruction.HLdescrp}</B> >];\n"
             out +=  "}\n"
-            
+        
+        # generate cluster of input variables
+        out += " subgraph input_vars {\n"
+        out +=  "  node [style=box, color=invis, fontcolor=darkpurple,"
+        out +=  " width=0.5, height=0.5,fixedsize=true, fontname=\"Courier-bold\"];\n"
+
+        for ins_idx, instruction in self.instructions:
+          for rs, i_d in self.dependencies[ins_idx].items():
+            if ins_idx <= i_id:       
+              # receives data from last iteration
+              # Check if part of a critical path    
+              is_recurrent = False
+              for path in recurrent_paths:
+                curr = path[0]
+                next = path[1]
+                if ins_idx == next and i_d == curr :
+                  is_recurrent = True
+                  break
+                else:
+                  for i in range(len(path)-2):
+                    curr = next
+                    next = path[i+2]
+                    if next == ins_idx and curr == i_d:
+                      is_recurrent = True
+                      break
+
+              reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
+              curr_color = "red" if is_recurrent else "black"
+              out += f"InVar{i_d} [label=\"{reg}\", fontcolor={curr_color}];\n"
+        out += "}\n"
+
+        # generate cluster of output variables
+        out += " subgraph output_vars {\n"
+        out +=  "  node [style=box, color=invis, fontcolor=darkpurple,"
+        out +=  " width=0.5, height=0.5,fixedsize=true, fontname=\"Courier-bold\"];\n"
+
+        for ins_idx, instruction in self.instructions:
+          for rs, i_d in self.dependencies[ins_idx].items():
+            if ins_idx <= i_id:       
+              # receives data from last iteration
+              # Check if part of a critical path    
+              is_recurrent = False
+              for path in recurrent_paths:
+                curr = path[0]
+                next = path[1]
+                if ins_idx == next and i_d == curr :
+                  is_recurrent = True
+                  break
+                else:
+                  for i in range(len(path)-2):
+                    curr = next
+                    next = path[i+2]
+                    if next == ins_idx and curr == i_d:
+                      is_recurrent = True
+                      break
+
+              reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
+              curr_color = "red" if is_recurrent else "black"
+              out += f"OutVar{i_d} [label=\"{reg}\", fontcolor={curr_color}];\n"
+        out += "}\n"
+
+
         for iter_idx in range(1, max_iters+1):
           for ins_idx, instruction in self.instructions:
             for rs, i_d in self.dependencies[ins_idx].items():
+
               reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
               
               # True if it's the first or last instruction of an iteration path
               is_border = i_d >= ins_idx
                     
-              # Then, next instruction depends on output of current instr
-              
               # Check if the current path is part of a critical path    
               is_recurrent = False
               for path in recurrent_paths:
@@ -366,18 +427,12 @@ class Program:
               curr_color = "red" if is_recurrent else "black"
 
               if is_border:
-                if iter_idx == 1:
-                  out += f"i0s{i_d} [color=invis, label=\" {reg}\"];\n"
-                out += f"i{iter_idx-1}s{i_d} -> i{iter_idx}s{ins_idx}[label=\" {reg}\", "
-                out += f"color={curr_color}, penwidth=2.0];\n"
+                out += f"InVar{i_d}:s -> i{iter_idx}s{ins_idx} [color={curr_color}, penwidth=2.0];\n"
 
-                if iter_idx == max_iters:
-                  out += f"i{iter_idx+1}s{ins_idx} [color=invis, label=\" {reg}\"];\n"
-                out += f"i{iter_idx}s{i_d} -> i{iter_idx+1}s{ins_idx}[label=\" {reg}\", "
-                out += f"color={curr_color}, penwidth=2.0];\n"
+                out += f"i{iter_idx}s{i_d} -> OutVar{ins_idx}:n [color={curr_color}, penwidth=2.0];\n"
 
               else:
-                out += f"i{iter_idx}s{i_d} -> i{iter_idx}s{ins_idx}[label=\" {reg}\", color={curr_color}];\n"
+                out += f"i{iter_idx}s{i_d} -> i{iter_idx}s{ins_idx} [label=\" {reg}\", color={curr_color}];\n"
 
         return out + "}\n"
 
