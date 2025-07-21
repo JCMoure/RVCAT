@@ -341,9 +341,9 @@ class Program:
         # generate cluster of input variables
         out += " subgraph input_vars {\n"
         out +=  "  node [style=box, color=invis, fontcolor=darkpurple,"
-        out +=  " width=0.5, height=0.5,fixedsize=true, fontname=\"Courier-bold\"];\n"
+        out +=  " width=0.5, height=0.5, fixedsize=true, fontname=\"Courier-bold\"];\n"
 
-        for ins_idx, instruction in self.instructions:
+        for ins_idx, _ in self.instructions:
           for rs, i_d in self.dependencies[ins_idx].items():
             if ins_idx <= i_id:       
               # receives data from last iteration
@@ -366,14 +366,16 @@ class Program:
               reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
               curr_color = "red" if is_recurrent else "black"
               out += f"InVar{i_d} [label=\"{reg}\", fontcolor={curr_color}];\n"
-        out += "}\n"
+
+        out += " }\n"
+
 
         # generate cluster of output variables
         out += " subgraph output_vars {\n"
         out +=  "  node [style=box, color=invis, fontcolor=darkpurple,"
-        out +=  " width=0.5, height=0.5,fixedsize=true, fontname=\"Courier-bold\"];\n"
+        out +=  " width=0.5, height=0.5, fixedsize=true, fontname=\"Courier-bold\"];\n"
 
-        for ins_idx, instruction in self.instructions:
+        for ins_idx, _ in self.instructions:
           for rs, i_d in self.dependencies[ins_idx].items():
             if ins_idx <= i_id:       
               # receives data from last iteration
@@ -396,11 +398,12 @@ class Program:
               reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
               curr_color = "red" if is_recurrent else "black"
               out += f"OutVar{i_d} [label=\"{reg}\", fontcolor={curr_color}];\n"
-        out += "}\n"
+              
+        out += " }\n"
 
 
         for iter_idx in range(1, max_iters+1):
-          for ins_idx, instruction in self.instructions:
+          for ins_idx, _ in self.instructions:
             for rs, i_d in self.dependencies[ins_idx].items():
 
               reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
@@ -428,7 +431,6 @@ class Program:
 
               if is_border:
                 out += f"InVar{i_d}:s -> i{iter_idx}s{ins_idx} [color={curr_color}, penwidth=2.0];\n"
-
                 out += f"i{iter_idx}s{i_d} -> OutVar{ins_idx}:n [color={curr_color}, penwidth=2.0];\n"
 
               else:
