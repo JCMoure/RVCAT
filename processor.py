@@ -6,7 +6,6 @@ import os
 from typing       import Optional
 from .instruction import Instruction
 from .cache       import Cache
-from .isa         import _isa
 from pathlib      import Path
 
 PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
@@ -110,11 +109,6 @@ class Processor:
         if self.nBlocks > 0:
             self.cache = Cache(self.nBlocks, self.blkSize,
                                self.mPenalty, self.mIssueTime)
-
-        isas = config.get("general", "isas", fallback="").split(",")
-        for isa in isas:
-            _isa.load_isa(isa.strip())
-
 
     def import_processor_json(self, config: str) -> None:
 

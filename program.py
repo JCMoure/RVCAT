@@ -1,11 +1,10 @@
-from .instruction import Instruction, InstrFormat, MemType
+
+from .instruction import Instruction
 from .processor   import Processor, _processor
-from .parser      import Parser, Mnemonic, Operands, Description, Annotation
 from pathlib      import Path
 
 import importlib.resources
-import json
-import os
+import json, os
 
 PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples")
 
@@ -14,16 +13,46 @@ global _program
 class Program:
 
     def __init__(self) -> None:
-        self.instructions = []
-        self.n            = 0
+
+        # data loaded/stored which do not change during execution
+        self.name             = ""
+        self.n                = 0
+        self.instruction_list = []
+
+        # data generated when loading a new program. Do not need to save it
         self.loaded       = False
-        self.name         = ""
-        self.pad          = 0
-        self.pad_type     = 0
+        self.variables    = [] # variable names (each appears only once, in program order)
+        self.constants    = [] # constant values/variable names (only once, program order)
+        self.read_only    = [] # list of read-only variable names (only once)
+
+        self.loop_carried = [] # list of tuples of loop-carried variables: (producer_id,var_name)
+
+        self.inst_dependence_list = []  ## list of instruction data dependencies
+        self.dependence_edges     = []  ## list of dependence offsets
+        self.cyclic_paths         = []  # list of cyclic paths (a list of inst_ids)
 
 
-    def import_program_json(self, data):
-        if isinstance(data, str):
+    # return JSON structure of current program
+    def json(self):
+        return json.dumps(self.__dict__(), indent=2)
+
+    # return JSON values of current program-class instance
+    def __dict__(self):
+        data = {
+            "name": os.path.splitext(os.path.basename(self.name))[0],
+            "n":    self.n,
+        }
+        data["instruction_list"]=[]
+        for instruction in self.instruction_list:
+            data["instruction_list"].append(instruction.json())
+
+        return data
+
+
+    # write program to disk, either JSON structure or String specifying Json
+    def export_program(self, data):
+
+        if isinstance(data, str):  # if data is a string, convert to JSON structure
             try:
                 cfg = json.loads(data)
             except json.JSONDecodeError as e:
@@ -39,11 +68,43 @@ class Program:
             json.dump(cfg, f, indent=2)
 
 
+    # return JSON structure containing names of programs found in PROGRAM_PATH
+    def list_programs_json(self) -> str:
+        p = ['.'.join(f.split('.')[:-1]) for f in os.listdir(PROGRAM_PATH) if f.endswith(".json")]
+        return json.dumps(p)
+
+
+    # Load JSON file containing program specification
+    def load_program(self, file="") -> None:
+        if file:
+            json_path = PROGRAM_PATH + f"{file}.json"
+        else:
+            json_path = PROGRAM_PATH + "baseline.json"
+
+        try:
+           if not os.path.exists(json_path):
+              raise FileNotFoundError(f"File not found: {json_path}")
+
+           # Attempt to open the file
+           with open(json_path, "r") as f:
+               program = json.load(f)
+           self.load_program_json(program)
+           return
+
+        except FileNotFoundError as e:
+           print(f"Error: {e}")
+        except IOError as e:
+           print(f"I/O Error while opening file: {e}")
+        except Exception as e:
+           print(f"Unexpected error: {e}")
+
+
+    # load JSON structure into program instance
     def load_program_json(self, data):
 
         print("loading json program");
 
-        if isinstance(data, str):
+        if isinstance(data, str):  # if it is a string convert to JSON struct
             try:
                 cfg = json.loads(data)
             except json.JSONDecodeError as e:
@@ -51,240 +112,247 @@ class Program:
         else:
             cfg = data
 
-        self.name      = cfg.get("name", "")
-        self.n         = cfg.get("n", 0)
-        self.pad       = cfg.get("pad", 0)
-        self.pad_type  = cfg.get("pad_type", 0)
-        self.loaded    = True
+        self.name   = cfg.get("name", "")
+        self.n      = cfg.get("n", 0)
+        self.loaded = True
 
         instrs = []
-        for idx, entry in enumerate(cfg.get("instructions", [])):
+        for entry in cfg.get("instruction_list", []):
             instr_dict = json.loads(entry) if isinstance(entry, str) else entry
             instr = Instruction.from_json(instr_dict)
-            instrs.append((idx, instr))
+            instrs.append(instr)
 
-        self.instructions = instrs
-        self.n            = len(instrs)
+        self.instruction_list = instrs
 
-        self.processor    = _processor
+        if self.n != len(instrs):
+            raise ValueError(f"JSON corrupted n={self.n} is not number of instructions={len(instrs)}")
+         
+        self.processor = _processor
         self.processor.reset()
-        self.dependencies     = {}
-        self.dependency_graph = {i: [] for i, _ in instrs}
-        self.generate_dependencies()
 
+        self.variables    = [] # variable names (each appears only once, in program order)
+        self.constants    = [] # constant values/variable names (only once, program order)
+        self.loop_carried = [] # index to list of variable names which are loop-carried
+        self.read_only    = [] # index to list of variable names which are read-only
 
-    def load_program(self, file="") -> None:
-        if (file!=""):
-            parser   = Parser()
+        self.inst_dependence_list = []  ## list of instruction data dependencies
+        # inst_dependence_list = [ i0, i1, i2 ... ]; 
+        #       i0 = [ dep0, dep1, ...];   List of input dependencies, from 0 to 3
+        #     dep0 = [ instID, varID / constID]; 
+        #   instID = 0 to N-1  index of instruction generating input value
+        #    varID = 0 to K-1  index of variable name representing input value
+        #   instID = -1  means input value is constant
+        #   instID = -3  means input value is read-only variable
+        #  constID = 0 to C-1  index to constant name representing input constant
 
-            if file:
-                json_path = PROGRAM_PATH.joinpath(f"{file}.json")
-                asm_path  = PROGRAM_PATH.joinpath(f"{file}.s")
+        Outs    = [] ## List of output variable names in program's instruction order
+        Reads1  = [] ## List of  first input variable names in program's instruction order
+        Reads2  = [] ## List of second input variable names in program's instruction order
+        Reads3  = [] ## List of third output variable names in program's instruction order
+        Consts  = [] ## List of constants in program's instruction order
 
-                if json_path.exists():
-                    # load from JSON
-                    with open(json_path, "r") as f:
-                        cfg = json.load(f)
-                    self.load_program_json(cfg)
-                    return
-                elif asm_path.exists():
-                    self.name = str(asm_path)
-                else:
-                    raise FileNotFoundError(
-                        f"Neither {json_path} nor {asm_path} exist."
-                    )
+        for inst in instrs:
+            Outs.append  (inst.destin)
+            Consts.append(inst.constant)
+            Reads1.append(inst.source1)
+            Reads2.append(inst.source2)
+            Reads3.append(inst.source3)
 
-            prg_list = parser.parse_file(self.name)
+        # List of variable names that are output of an instruction (appears only once)
+        Outputs = list(set(Outs))  
+        if "" in Outputs:
+          Outputs.remove("")
 
-            self.instructions = []
+        # List of variable names that are input of an instruction (appears only once)
+        Inputs = list(set(Reads1+Reads2+Reads3))  
+        if "" in Inputs:
+          Inputs.remove("")
 
-            mnemonic = None
-            operands = []
-            HLdesc   = ""
-            Annotate = []
-            self.pad = 0
-            self.pad_type= 0
+        # List of variable names (each appears only once, in program order)
+        self.variables = list(set(Outputs+Inputs))
+        if "" in self.variables:
+          self.variables.remove("")
 
-            for item in prg_list:
-                if type(item) == Mnemonic:
-                    # Insert new instruction
-                    if mnemonic != None:
-                        self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
-                        self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
+        # List of constant values / variable names (each appears only once)
+        self.constants = list(set(Consts))
+        if "" in self.constants:
+          self.constants.remove("")
+       
+        # remove constants which are already a variable (this should not happen)
+        setVars = set(self.variables)
+        index = 0
+        for c in self.constants:
+          if c in setVars:
+             self.constants.pop(index)
+          else:
+            index += 1
 
-                    operands = []
-                    HLdesc   = ""
-                    Annotate = []
-                    mnemonic = item.name
-                elif type(item) == Operands:
-                    operands = item.name
-                elif type(item) == Description:
-                    HLdesc = item.name
-                    self.pad = max(self.pad, len(HLdesc))
-                elif type(item) == Annotation:
-                    Annotate = item.name
+        # initialize list of producers for each variable as NONE
+        producer_list = [-2 for _ in range(len(Outputs))]
 
-            if mnemonic != None:
-                self.instructions.append( Instruction( mnemonic, operands, HLdesc, Annotate ) )
-                self.pad_type = max( self.pad_type, len(self.instructions[-1].type))
+        # analyze all instructions in program order to generate dependence info
+        for inst_id in range(self.n):
 
-            self.loaded       = True
-            self.instructions = list(enumerate(self.instructions))
-            self.n            = len(self.instructions)
+            # create dependence list for intruction inst_id and append to program's dependence list
+            dep_list = [] 
+            self.inst_dependence_list.append(dep_list)
 
-            self.processor    = _processor
-            self.processor.reset()
+            const = Consts[inst_id]
+            if const:  # register usage of this constant
+                dep = [-1, self.constants.index(const)]
+                dep_list.append(dep)
 
-            self.dependencies     = {}
-            self.dependency_graph = {i:[] for i,_ in self.instructions}
-            self.generate_dependencies()
+            source_var = Reads1[inst_id]
+            if source_var:  # register dependence on this variable
+                var_idx = self.variables.index(source_var)
+                if source_var in Outputs:
+                    out_idx  = Outputs.index(source_var)
+                    prod_idx = producer_list[out_idx]
+                else:  # read-only variable: acts as if it is a constant value
+                    prod_idx = -3
+                    self.read_only.append(source_var)
+                dep = [prod_idx, var_idx]
+                dep_list.append(dep)
 
+            source_var = Reads2[inst_id]
+            if source_var:  # register dependence on this variable
+                var_idx = self.variables.index(source_var)
+                if source_var in Outputs:
+                    out_idx  = Outputs.index(source_var)
+                    prod_idx = producer_list[out_idx]
+                else:  # read-only variable: acts as if it is a constant value
+                    prod_idx = -3
+                    self.read_only.append(source_var)
+                dep = [prod_idx, var_idx]
+                dep_list.append(dep)
 
-    def json(self):
-        return json.dumps(self.__dict__(), indent=2)
-    
+            source_var = Reads3[inst_id]
+            if source_var:  # register dependence on this variable
+                var_idx = self.variables.index(source_var)
+                if source_var in Outputs:
+                    out_idx  = Outputs.index(source_var)
+                    prod_idx = producer_list[out_idx]
+                else:  # read-only variable: acts as if it is a constant value
+                    prod_idx = -3
+                    self.read_only.append(source_var)
+                dep = [prod_idx, var_idx]
+                dep_list.append(dep)
 
-    def __dict__(self):
-        data= {
-            "n": self.n,
-            "name": os.path.splitext(os.path.basename(self.name))[0],
-            "pad": self.pad,
-            "pad_type": self.pad_type
-        }
-        data["instructions"]=[]
-        for instruction in self.instructions:
-            data["instructions"].append(instruction[1].json())
+            output_var = Outs[inst_id]
+            if output_var:  # modify producer of this variable
+                out_idx = Outputs.index(output_var)
+                producer_list[out_idx] = inst_id
 
-        return data
+        # analyze all instructions in program order to solve loop-carried dependencies
+        for inst_id in range(self.n):
+            # obtain dependence list for intruction inst_id
+            dep_list = self.inst_dependence_list[inst_id]
+            for dep in dep_list:
+                if dep[0] == -2: # dependence is pending to solve
+                    source_var= self.variables[ dep[1] ]
+                    out_idx   = Outputs.index(source_var)
+                    prod_idx  = producer_list[out_idx]
+                    dep[0] = prod_idx
+                    self.loop_carried.append( (prod_idx, source_var) )
 
+        # List of read-only variable names (each appears only once, in program order)
+        self.read_only    = list(set(self.read_only))
 
-    def list_programs_json(self) -> str:
+        # List of tuples of loop-carried (producer, variable name) each appears only once
+        self.loop_carried = list(set(self.loop_carried))
 
-        programs = ['.'.join(f.split('.')[:-1]) for f in os.listdir(PROGRAM_PATH) if (f.endswith(".s") or f.endswith(".json"))]
-        return json.dumps(programs)
-
-
-    def generate_dependencies(self) -> None:
-
-        for i_1, instr_1 in self.instructions:
-            instr_deps             = {}
-            self.dependencies[i_1] = instr_deps
-
-            if instr_1.format in [InstrFormat.UPPER_IMM, InstrFormat.JUMP]:
-                continue
-
-            ordered_instrs = self.instructions[:i_1][::-1] + self.instructions[i_1:][::-1]
-
-            for i_2, instr_2 in ordered_instrs:
-                if (instr_1.format == InstrFormat.IMM and len(instr_deps) == 1):
-                    break
-
-                if (instr_1.format == InstrFormat.REG_REG_4):
-                  if len(instr_deps) == 3:
-                    break
-
-                elif len(instr_deps) == 2:
-                    break
-
-                if instr_2.format in [InstrFormat.STORE, InstrFormat.BRANCH]\
-                        or instr_2.rd.lower() in ["x0", "zero"]:
-                    continue
-
-                if instr_1.rs1.lower() == instr_2.rd.lower():
-                    rs = "rs1"
-                elif instr_1.rs2.lower() == instr_2.rd.lower():
-                    rs = "rs2"
-                elif instr_1.rs3.lower() == instr_2.rd.lower():
-                    rs = "rs3"
-                else:
-                    continue
-
-                if instr_deps.get(rs) != None:
-                    continue
-                instr_deps[rs] = i_2
-                self.dependency_graph[i_2].append(i_1)
+        self.generate_dependence_info()
+        self.get_cyclic_paths()
 
 
     def generate_dependence_info (self):
-        n_static_instr = self.n
 
-        # For each static instruction, list of dependent offsets
+        # Used by execution scheduler to control data dependencies during execution
+        # For each static instruction, list of dependent offsets 
         # offset = positive number to subtract to my instruction ID to find dependent intr. ID
-        DependenceEdges  = []
 
-        for i in range(n_static_instr):
-            dependents = self.dependencies[i].items()
+        self.dependence_edges = []  
+
+        for inst_id in range(self.n):
             offsets = []
-            for _, j in dependents:
-                if j >= i: # loop carried dependency
-                    offset = i - j + n_static_instr
+            for dep in self.inst_dependence_list[inst_id]:
+                dep_id = dep[0]  # ID of instruction providing data to instruction inst_id
+                if dep_id >= inst_id: # loop carried dependence
+                    offset = inst_id - dep_id + self.n
                 else:
-                    offset = i - j
+                    offset = inst_id - dep_id
                 offsets.append(offset)
 
-            DependenceEdges.append(offsets)
-
-        return DependenceEdges
+            self.dependence_edges.append(offsets)
 
 
+    def get_cyclic_paths(self):
 
-    def get_cyclic_paths(self) -> list:
-        
-        # return list of cyclic dependence paths: [[3, 3], [2, 0, 2]], 
-        #numbers are instr-IDs: same ID appears at begin & end
+        # return list of cyclic dependence paths: [[3, 3], [2, 0, 2]],
+        # numbers are instr-IDs: same ID appears at begin & end
 
         start_instrs = []
 
-        for i in range(self.n):
-            if all(i <= j for j in self.dependencies[i].values()):
-                start_instrs.append(i)
+        for inst_id in range(self.n):
+            some_prev_dependence = False
+            for dep in self.inst_dependence_list[inst_id]:
+                if (dep[0] >= 0) and (dep[0] < inst_id):
+                    some_prev_dependence = True
+            if not some_prev_dependence:
+                start_instrs.append(inst_id)
 
-        cyclic_paths = []
-        paths        = [ [i]  for i in start_instrs]
-        visited       = { i:[] for i in range(self.n)}
+        # dependency graph in reverse order: from producer to consumer
+        dependency_graph = {i:[] for i in range(self.n)}
+        for inst_id in range(self.n):
+            for dep in self.inst_dependence_list[inst_id]:
+                if (dep[0] >= 0):
+                    dependency_graph[dep[0]].append(inst_id)
+
+        self.cyclic_paths = []
+        paths             = [ [i]  for i in start_instrs]
+        visited           = { i:[] for i in range(self.n)}
 
         while paths:
             path = paths.pop()
             last = path[-1]
-            for dep in self.dependency_graph[last]:
-                if dep not in visited[last]:
-                    paths.append(path+[dep])
-                    visited[last].append(dep)
+            for dep_id in dependency_graph[last]:
+                if dep_id not in visited[last]:
+                    paths.append(path+[dep_id])
+                    visited[last].append(dep_id)
                 else:
-                    if len(set(path)) != len(path):
+                    if len(set(path)) != len(path):  # some inst_id appears twice
                         path = path[path.index(last):]
-                        if path not in cyclic_paths:
-                            cyclic_paths.append(path)
-
-        return cyclic_paths  
+                        if path not in self.cyclic_paths:
+                            self.cyclic_paths.append(path)
 
 
     def get_instr_latencies(self) -> list:
+
         # return list of latencies for ordered list of instructions
-        
+
         latencies = []
 
         for i in range(self.n):
-            resource = self.processor.get_resource(self.instructions[i][1].type)
+            resource = self.processor.get_resource(self.instruction_list[i].type)
             if not resource:
                 latency = 1
             else:
                 latency = resource[0]
             latencies.append(latency)
-    
+
         return latencies
 
 
-
     def get_instr_ports (self) -> list:
+
         # return list of port_usage masks for ordered list of instructions
- 
+
         ports        = list( self.processor.ports.keys() )
         n_ports      = len ( ports )
         resources    = []
 
         for i in range(self.n):
-            resource   = self.processor.get_resource(self.instructions[i][1].type)
+            resource   = self.processor.get_resource(self.instruction_list[i].type)
             instr_mask = 0
             mask_bit   = 1
             for j in range(n_ports):
@@ -296,12 +364,49 @@ class Program:
         return resources
 
 
+    def show_code(self) -> str:
+        InsMessage = "INSTRUCTIONS"
+        out = f"   {InsMessage:20}     TYPE      LATENCY  EXECUTION PORTS\n"
+        for i in range(self.n):
+            instruction = self.instruction_list[i]
+            instr_type  = instruction.type
+            resource    = self.processor.get_resource(instr_type)
+            if not resource:
+                latency = 1
+                ports = ()
+            else:
+                latency, ports = resource
+            out += f"{i:{len(str(self.n))}}:"
+            out += f"{instruction.text:20} : "
+            out += f"{instr_type:18} : {latency:^3} : "
 
-    def get_recurrent_paths_graphviz(self) -> str:
+            n = len(ports)
+            for j in range(n-1):
+              out += f"P{ports[j]},"
 
-        colors = ["lightblue", "greenyellow", "lightyellow", "lightpink", "lightgrey", "lightcyan", "lightcoral"]
+            out += f"P{ports[n-1]}\n"
 
-        recurrent_paths = self.get_cyclic_paths()
+        return out
+
+
+    def show_instruction_memory_trace(self) -> str:
+        out = ""
+        return out
+
+
+    def show_memory_trace(self) -> str:
+        out = "............................. Memory Trace Description ..........................."
+        out += "\n...............................................................................\n\n"
+        return out
+
+
+    def show_graphviz(self, show_const=False,    show_readonly=False, 
+                            show_internal=False, show_latency=False) -> str:
+
+        colors = ["lightblue", "greenyellow", "lightyellow", 
+                  "lightpink", "lightgrey",   "lightcyan", "lightcoral"]
+
+        recurrent_paths = self.cyclic_paths
         latencies       = self.get_instr_latencies()
 
         max_latency    = 0   # maximum latency per iteration
@@ -309,8 +414,8 @@ class Program:
         path_latencies = []  # latencies of cyclic paths
 
         for path in recurrent_paths:
-            latency = sum(latencies[i] for i in path[:-1])
-            iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
+            latency = sum( latencies[i] for i   in path[:-1] )
+            iters   = sum( a >= b       for a,b in zip(path[:-1], path[1:]) )
             latency_iter = latency / iters
             path_latencies.append(latency_iter)
             if latency_iter > max_latency:
@@ -318,72 +423,158 @@ class Program:
             max_iters = max( iters, max_iters )
 
         out  = "digraph G {\n  rankdir=\"TB\"; splines=spline; newrank=true;\n"
-        out += "  edge [fontname=\"Consolas\"; color=black; penwidth=1.0; "
-        out += "fontsize=12; fontcolor=blue];\n"
+        out += "  edge [fontname=\"Consolas\"; color=black; penwidth=1.5; "
+        out += "fontsize=14; fontcolor=blue];\n"
 
         # generate clusters of nodes: one cluster per loop iteration
-        for iter_idx in range(1, max_iters+1):
-            out += f" subgraph cluster_{iter_idx} "
-            out +=  "{\n  style=\"filled,rounded\"; label= <<B>iteration "
-            out += f"{iter_idx}</B>>; fontname=\"Consolas\";\n"
-            out +=  "  labeljust=\"l\"; color=blue; fontcolor=blue;\n"
-            out += f"  fontsize=21; fillcolor={colors[iter_idx-1]};\n"
+        for iter_id in range(1, max_iters+1):
+            out += f" subgraph cluster_{iter_id} "
+            out +=  "{\n  style=\"filled,rounded\"; color=blue; "
+            out += f"fillcolor={colors[iter_id-1]};\n"
             out +=  "  node [style=filled, shape=rectangle, fillcolor=lightgrey,"
             out +=  " fontname=\"Consolas\", fontsize=16, margin=0.0];\n"
 
-            for ins_idx, instruction in self.instructions:
-                lat = latencies[ins_idx]
-                out += f"i{iter_idx}s{ins_idx} "
-                out += f"[xlabel=\"lat={lat} \", " 
-                out += f"label=< <B>{ins_idx}:{instruction.HLdescrp}</B> >];\n"
+            for inst_id in range(self.n):
+                lat = latencies[inst_id]
+                out += f"  i{iter_id}s{inst_id} ["
+                if show_latency:
+                  out += f"xlabel=<<B><font color=\"red\" point-size=\"16\">{lat}</font></B>>, "           
+                out += f"label=< <B>{inst_id}: {self.instruction_list[inst_id].text}</B> >];\n"
             out +=  "}\n"
-       
-        # generate cluster of input variables
-        out += " subgraph inVAR {\n"
-        out += "  node [style=box, color=invis, fontcolor=darkpurple,"
-        out += " width=0.5, heigth=0.5, fixedsize=true, fontname=\"Courier-bold\"];\n"
 
-        for ins_idx, _ in self.instructions:
-          for rs, i_d in self.dependencies[ins_idx].items():
-            if ins_idx <= i_id:
-              reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
-              out += f"  InVar{i_d} [label=\"{reg}\"];\n"
+    
+       # generate cluster of input variables
+        out += " subgraph inVAR {\n"
+        out += "  node[style=box,color=invis,width=0.5,heigth=0.5,fixedsize=true,fontname=\"Courier-bold\"];\n"
+
+        for const_id in range( len(self.constants) ):
+           var = self.constants[const_id]
+           out += f"  Const{const_id} [label=\"{var}\", fontcolor=grey];\n"
+
+        for RdOnly_id in range( len(self.read_only) ):
+           var = self.read_only[RdOnly_id]
+           out += f"  RdOnly{RdOnly_id} [label=\"{var}\", fontcolor=green];\n"
+
+        for LoopCar_id in range( len(self.loop_carried) ):
+           (_,var) = self.loop_carried[LoopCar_id]
+           out += f"  LoopCar{LoopCar_id} [label=\"{var}\", fontcolor=red];\n"
 
         out += " }\n"
 
-        for iter_idx in range(1, max_iters+1):
-          for ins_idx, _ in self.instructions:
-            for rs, i_d in self.dependencies[ins_idx].items():
+        out += " { rank=min; "
+        for const_id in range( len(self.constants) ):
+           out += f"Const{const_id}; "
 
-              reg = eval(f"self.instructions[{ins_idx}][1].{rs}")
-              
-              # True if it's the first or last instruction of an iteration path
-              is_border = i_d >= ins_idx
-                    
-              # Check if the current path is part of a critical path    
+        for RdOnly_id in range( len(self.read_only) ):
+           out += f"RdOnly{RdOnly_id}; "
+
+        for LoopCar_id in range( len(self.loop_carried) ):
+           out += f"LoopCar{LoopCar_id}; "
+
+        out += " }\n\n"
+
+
+        # generate cluster of output variables
+        out += " subgraph outVAR {\n"
+        out += "  node [style=box, color=invis, fontcolor=red,"
+        out += " width=0.5, heigth=0.5, fixedsize=true, fontname=\"Courier-bold\"];\n"
+
+        for LoopCar_id in range( len(self.loop_carried) ):
+           (_,var) = self.loop_carried[LoopCar_id]
+           out += f"  OutCar{LoopCar_id} [label=\"{var}\"];\n"
+
+        out += " }\n"
+
+        out += " { rank=max; "
+        for LoopCar_id in range( len(self.loop_carried) ):
+           out += f"OutCar{LoopCar_id}; "
+
+        out += " }\n\n"
+
+
+        # generate dependence links: initial and intermediate
+        for iter_id in range(1, max_iters+1):
+          for inst_id in range(self.n):
+            for dep in self.inst_dependence_list[inst_id]:
+
+              i_id = dep[0]
+              var  = dep[1]
+
+              if i_id == -1:  # depends on Constant
+                if show_const:
+                  out += f"  Const{var} -> i{iter_id}s{inst_id}[color=grey];\n"
+                else:
+                  out += f"  Const{var} -> i{iter_id}s{inst_id}[color=invis];\n"
+                continue
+
+              if i_id == -3:  # depends on Read-Only variable
+                label  = self.variables[var]
+                RdOnly_id = self.read_only.index(label)
+                if show_readonly:
+                  out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=green];\n"
+                else:
+                  out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=invis];\n"
+                continue
+
+              # Check if current dependence is a part of a cyclical path
               is_recurrent = False
               for path in recurrent_paths:
                 curr = path[0]
                 next = path[1]
-                if ins_idx == next and i_d == curr :
+                if inst_id == next and i_id == curr :
                   is_recurrent = True
                   break
                 else:
                   for i in range(len(path)-2):
                     curr = next
                     next = path[i+2]
-                    if next == ins_idx and curr == i_d:
+                    if next == inst_id and curr == i_id:
                       is_recurrent = True
                       break
 
-              curr_color = "red" if is_recurrent else "black"
-
-              if is_border:
-                out += f"InVar{i_d}:s -> i{iter_idx}s{ins_idx} [color={curr_color}, penwidth=2.0];\n"
-                out += f"i{iter_idx}s{i_d} -> OutVar{ins_idx}:n [color={curr_color}, penwidth=2.0];\n"
-
+              if is_recurrent:
+                  arrow = "color=red, penwidth=2.0"
               else:
-                out += f"i{iter_idx}s{i_d} -> i{iter_idx}s{ins_idx} [label=\" {reg}\", color={curr_color}];\n"
+                  arrow = ""
+
+              if inst_id > i_id: ## Not loop-carried
+                  in_var = f"i{iter_id}s{i_id}"
+                  label  = self.variables[var]
+              else:   ## Loop-carried
+                  if iter_id == 1: # first loop iteration
+                      var = self.variables[var]
+                      for LoopCar_id in range( len(self.loop_carried) ):
+                          (_,lc_var) = self.loop_carried[LoopCar_id]
+                          if var == lc_var:
+                             in_var = f"LoopCar{LoopCar_id}"
+                             break
+                      label  = ""
+                  else:
+                      in_var = f"i{iter_id-1}s{i_id}"
+                      label  = self.variables[var]
+
+              if not is_recurrent and not show_internal:
+                  out += f"  {in_var} -> i{iter_id}s{inst_id} [color=invis];\n"
+              else:
+                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", {arrow}];\n"
+
+
+        # generate dependence links to loop-carried variables in final iteration
+        for LoopCar_id in range( len(self.loop_carried) ):
+           (prod_id,_) = self.loop_carried[LoopCar_id]
+
+           # Check if current dependence is a part of a cyclical path
+           is_recurrent = False
+           for path in recurrent_paths:
+             for i in range(len(path)-1):
+               if prod_id == path[i]:
+                 is_recurrent = True
+                 break
+
+           if is_recurrent:
+               out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id}[color=red, penwidth=2.0];\n"
+           else:
+               out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id};\n"
 
         return out + "}\n"
 
@@ -394,7 +585,7 @@ class Program:
         ports    = list( self.processor.ports.keys() )
         n_ports  = len ( ports )
 
-        recurrent_paths = self.get_cyclic_paths()
+        recurrent_paths = self.cyclic_paths
         latencies       = self.get_instr_latencies()
         resources       = self.get_instr_ports()
 
@@ -438,7 +629,6 @@ class Program:
         out += f" Throughput-limit is {max_cycles:0.2f} cycles/iteration\n"
         out += f"  Latency-limit   is {max_latency:0.2f} cycles/iteration\n"
         out += f"\n*** Throughput ********\n"
-
         tot=0;
         if dw_cycles == max_cycles:
            out += f"dispatch stage"
@@ -490,78 +680,22 @@ class Program:
         return out
 
 
-    def show_code(self) -> str:
-        InsMessage = "INSTRUCTIONS"
-        out = f"   {InsMessage:{self.pad}}     TYPE      LATENCY  EXECUTION PORTS\n"
-        for i, instruction in self.instructions:
-            instr_type = instruction.type
-            resource = self.processor.get_resource(instr_type)
-            if not resource:
-                latency = 1
-                ports = ()
-            else:
-                latency, ports = resource
-            out += f"{i:{len(str(self.n))}}:"
-            if instruction.HLdescrp != "":
-                out += f"{instruction.HLdescrp:{self.pad}} : "
-            out += f"{instr_type:{self.pad_type}} : {latency:^3} : "
-
-            n = len(ports)
-            for i in range(n-1):
-              out += f"P{ports[i]},"
-
-            out += f"P{ports[n-1]}\n"
-        
-        return out
-
-
-    def show_instruction_memory_trace(self) -> str:
-        out = ""
-        if self.processor.nBlocks > 0:
-            for i, instruction in self.instructions:
-                if instruction.memory != MemType.NONE:
-                    out += f"{i:{len(str(self.n))}}: {instruction.type:12}"
-                    out += f" Init_ADDR={instruction.addr:4} Stride={instruction.stride:2} N={instruction.N:3}\n"
-        return out
-
-
-    def show_memory_trace(self) -> str:
-        out = "····························· Memory Trace Description ···························"
-        for i, instruction in self.instructions:
-            if instruction.memory != MemType.NONE:
-                out += f"\n{i:{len(str(self.n))}}: "
-                if instruction.HLdescrp != "":
-                   out += f"{instruction.HLdescrp:{self.pad}}: "
-                else:
-                   out += f"{instruction}: "
-                out += f"{instruction.type:12} init_addr= {instruction.addr:3} stride= {instruction.stride:3} N= {instruction.N:3}"
-        out += "\n···············································································\n\n"
-        return out
-
-
-
     def instr_str(self, i: int) -> str:
-        _, instruction = self.instructions[i]
-        if instruction.HLdescrp != "":
-            out = f"{instruction.HLdescrp:{self.pad}}"
-        else:
-            out = f"{instruction}"
-        return out
+        return self.instruction_list[i].text
  
 
     def instr_type_str(self, i: int) -> str:
-        _, instruction = self.instructions[i]
-        return f"{instruction.type}"
+        return self.instruction_list[i].type
 
 
     def __repr__(self) -> str:
         out = ""
-        for i, instruction in self.instructions:
-            out += f"{i:{len(str(self.n))}}: {instruction}\n"
+        for i in range(self.n):
+            out += f"{i:{len(str(self.n))}}: {self.instruction_list[i]}\n"
         return out
 
-    def __getitem__(self, i: int) -> Instruction:
-        return self.instructions[i%self.n][1]
 
+    def __getitem__(self, i: int) -> Instruction:
+        return self.instruction_list[i%self.n]
 
 _program = Program()

@@ -4,12 +4,11 @@ import json
 from .window      import Window, InstrState
 from .program     import Program
 from .processor   import Processor, _processor
-from .instruction import Instruction, MemType
+from .instruction import Instruction
 
 from . import exec_graph as ex
 
 global _scheduler
-
 
 class Scheduler:
 
@@ -20,7 +19,6 @@ class Scheduler:
     def load_program(self, program: Program, iterations: int=3, window_size: int=100) -> None:
 
         self.program  = program
-        self.program.load_program()
         self.processor.reset()
 
         self.iterations = iterations
@@ -30,7 +28,7 @@ class Scheduler:
         self.pc         = 0
         self.cycles     = 0
 
-        self.DepEdges   = program.generate_dependence_info()
+        self.DepEdges   = program.dependence_edges
 
 
     def next_cycle(self) -> int:
@@ -63,18 +61,18 @@ class Scheduler:
             elif instr.state == InstrState.EXECUTE:
                 instr.latency -= 1
                 if instr.latency == 0:
-                    if instr.substate == InstrState.NONE and instr.memory != MemType.NONE:
+                    #if instr.substate == InstrState.NONE and instr.memory != MemType.NONE:
                         # Memory instruction: Cache access
-                        mType = 0 if instr.memory == MemType.LOAD else 1
-                        instr.latency, result, MM_access = self.processor.cache_access(mType, instr.memAddr, self.cycles)
-                        instr.exec_lat += instr.latency   # add extra latency in case of cache miss
+                    #    mType = 0 if instr.memory == MemType.LOAD else 1
+                    #    instr.latency, result, MM_access = self.processor.cache_access(mType, instr.memAddr, self.cycles)
+                    #    instr.exec_lat += instr.latency   # add extra latency in case of cache miss
                     
-                    if instr.latency > 0:
-                        if result == 1:
-                            instr.substate = InstrState.WAIT_CACHE_MISS
-                        else:
-                            instr.substate = InstrState.WAIT_CACHE_2ND
-                    else:
+                    #if instr.latency > 0:
+                    #    if result == 1:
+                    #        instr.substate = InstrState.WAIT_CACHE_MISS
+                    #    else:
+                    #        instr.substate = InstrState.WAIT_CACHE_2ND
+                    #else:
                         instr.state    = InstrState.WRITE_BACK
                         instr.substate = InstrState.NONE
 
@@ -155,22 +153,23 @@ class Scheduler:
         dw = self.processor.stages["dispatch"]
         while dw and not self.window.is_full():
             static_idx = self.pc % self.program.n
-            instr      = self.program[static_idx]
-            if self.processor.cache != None: 
-                instr_mem = instr.memory
-                addr      = instr.nextaddr
-                if instr_mem != MemType.NONE:
-                    instr.nextaddr = addr + instr.stride
-                    instr.count +=1
-                    if instr.count == instr.N:
-                        instr.count = 0
-                        instr.nextaddr = instr.addr
-                else:
-                    addr = -1
-            else:
-                instr_mem = MemType.NONE
-                addr      = -1
-            self.window.push(self.cycles, self.pc, static_idx, instr_mem, addr)
+            # instr      = self.program[static_idx]
+            # if self.processor.cache != None: 
+            #     instr_mem = instr.memory
+            #     addr      = instr.nextaddr
+            #     if instr_mem != MemType.NONE:
+            #         instr.nextaddr = addr + instr.stride
+            #         instr.count +=1
+            #         if instr.count == instr.N:
+            #             instr.count = 0
+            #             instr.nextaddr = instr.addr
+            #     else:
+            #         addr = -1
+            # else:
+            #    instr_mem = MemType.NONE
+            #    addr      = -1
+            # self.window.push(self.cycles, self.pc, static_idx, instr_mem, addr)
+            self.window.push(self.cycles, self.pc, static_idx, "", 0)
             self.pc += 1
             dw      -= 1
 
@@ -535,71 +534,6 @@ class Scheduler:
             out   += "\n"
 
         self.n = global_n
-
-        return out
-
-
-    def format_memtrace(self) -> str:
-        N_LOADs     = 0
-        N_STOREs    = 0
-        Trace       = ""
-        TotalIter   = self.n // self.program.n
-        Sz          = self.program.n
-
-        for i in range(self.n):
-            instr      = self.program[i % Sz]
-            instr_mem  = instr.memory
-            if instr_mem != MemType.NONE:  # Memory instruction
-                addr           = instr.nextaddr
-                instr.nextaddr = addr + instr.stride
-                instr.count   += 1
-                if instr.count == instr.N:
-                    instr.count    = 0
-                    instr.nextaddr = instr.addr
-
-                mType = 0 if instr.memory == MemType.LOAD else 1
-                if mType == 0:
-                    N_LOADs += 1
-                else:
-                    N_STOREs += 1
-
-                pre, post = "", ""
-                blk = ""
-
-                if self.processor.cache != None:  # Cache Access
-                    lat, result, _ = self.processor.cache_access(mType, addr, i)
-                    if lat > 0:
-                        if result == 1: # Primary Cache Miss
-                            block_number= addr // self.processor.blkSize
-                            pre  = "\033[91m"
-                            blk  = f"({block_number})"
-                            post = f"\033[0m"
-                        #  else:   Secondary Cache Miss
-
-                txt_addr = f"{addr}{blk}"
-                Trace   += f"{pre}{txt_addr:7}{post}, "
-                if (N_LOADs + N_STOREs) % 12 == 0:
-                    Trace += "\n"
-
-        out  = f"**** Memory Trace of Execution ****\n"
-        out += f" Iterations= {TotalIter}, Instructions= {self.n}, "
-
-        v_str = f"{N_LOADs/TotalIter:0.2f}"
-        out  += f"LOADs/Iter.= {v_str:^4}, "
-
-        v_str = f"{N_STOREs/TotalIter:0.2f}"
-        out  += f"STOREs/Iter.= {v_str:^4}"
-
-        if self.processor.cache != None:
-           _, _, RdMisses, WrMisses = self.processor.cache.statistics(1)
-
-           v_str = f"{RdMisses/TotalIter:0.2f}"
-           out  += f", \033[96m Rd Misses/Iter.= {v_str:^4}, "
-
-           v_str = f"{WrMisses/TotalIter:0.2f}"
-           out  += f" Wr Misses/Iter.= {v_str:^4} \033[0m"
-
-        out += f"\n  .... Address trace ....\n{Trace}\n"
 
         return out
 

@@ -1,7 +1,5 @@
-from typing      import Optional
-from .instruction import MemType
-
-from enum        import Enum
+from typing  import Optional
+from enum    import Enum
 
 class InstrState(Enum):
     DISPATCH       = "D"
@@ -18,8 +16,7 @@ class InstrState(Enum):
     NONE           = " "
 
 class InstrInstance:
-
-    def __init__(self, dispatch_cycle: int, dynamic_idx: int, static_idx: int, mType: MemType, addr: int) -> None:
+    def __init__(self, dispatch_cycle: int, dynamic_idx: int, static_idx: int, mType: str, addr: int) -> None:
         self.d_idx    = dynamic_idx
         self.s_idx    = static_idx
         self.state    = InstrState.DISPATCH
@@ -32,12 +29,12 @@ class InstrInstance:
         self.memAddr  = addr
         self.exec_lat = 0       # statistic of total execution latency, including waiting for resources
 
-    def __repr__(self) -> str:
+
+def __repr__(self) -> str:
         return f"{self.d_idx}: <{self.s_idx}, {self.cycle}>"
 
 
 class Window:
-
     def __init__(self, size: int) -> None:
         self.count = 0
         self.first = 0
@@ -64,7 +61,7 @@ class Window:
             return None
 
 
-    def push(self, disp_cycle:int, idx: int, instr: int, mType: MemType, addr: int) -> bool:
+    def push(self, disp_cycle:int, idx: int, instr: int, mType: str, addr: int) -> bool:
         if self.is_full():
             return False
         self.buffer[self.last] = (InstrInstance(disp_cycle, idx, instr, mType, addr))
@@ -88,6 +85,7 @@ class Window:
             return self.buffer[(i+self.first) % self.size]
         else:
             raise IndexError
+
 
     def __repr__(self) -> str:
         out = ""
