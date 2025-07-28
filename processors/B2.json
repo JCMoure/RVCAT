@@ -1,0 +1,98 @@
+{
+  "name": "B2",
+  "stages": {
+    "dispatch": 3,
+    "execute": 3,
+    "retire": 4
+  },
+  "resources": {
+    "INT": 1,
+    "BRANCH": 1,
+    "MEM.STR": 2,
+    "MEM.LOAD": 4,
+    "MEM.VLOAD": 5,
+    "MEM.VSTR": 2,
+    "FLOAT.ADD": 2,
+    "FLOAT.MUL": 4,
+    "FLOAT.FMA": 4,
+    "FLOAT.DIV": 6,
+    "FLOAT.SQRT": 8,
+    "VFLOAT.ADD": 3,
+    "VFLOAT.MUL": 4,
+    "VFLOAT.FMA": 4
+  },
+  "ports": {
+    "0": [
+      "INT",
+      "BRANCH",
+      "MEM.STR",
+      "MEM.LOAD",
+      "MEM.VLOAD",
+      "MEM.VSTR"
+    ],
+    "1": [
+      "INT",
+      "FLOAT.MUL",
+      "FLOAT.FMA",
+      "VFLOAT.MUL",
+      "VFLOAT.FMA"
+    ],
+    "2": [
+      "INT",
+      "FLOAT.ADD",
+      "FLOAT.DIV",
+      "FLOAT.SQRT",
+      "VFLOAT.ADD"
+    ]
+  },
+  "rports": {
+    "INT": [
+      "0",
+      "1",
+      "2"
+    ],
+    "BRANCH": [
+      "0"
+    ],
+    "MEM.STR": [
+      "0"
+    ],
+    "MEM.LOAD": [
+      "0"
+    ],
+    "MEM.VLOAD": [
+      "0"
+    ],
+    "MEM.VSTR": [
+      "0"
+    ],
+    "FLOAT.MUL": [
+      "1"
+    ],
+    "FLOAT.FMA": [
+      "1"
+    ],
+    "VFLOAT.MUL": [
+      "1"
+    ],
+    "VFLOAT.FMA": [
+      "1"
+    ],
+    "FLOAT.ADD": [
+      "2"
+    ],
+    "FLOAT.DIV": [
+      "2"
+    ],
+    "FLOAT.SQRT": [
+      "2"
+    ],
+    "VFLOAT.ADD": [
+      "2"
+    ]
+  },
+  "nBlocks": 0,
+  "blkSize": 8,
+  "mPenalty": 12,
+  "mIssueTime": 8
+}

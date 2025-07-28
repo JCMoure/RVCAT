@@ -1,14 +1,12 @@
-import configparser
-import importlib.resources
-import json
-import os
-
 from typing       import Optional
 from .instruction import Instruction
 from .cache       import Cache
-from pathlib      import Path
 
-PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
+from pathlib      import Path
+import importlib.resources
+import json, os
+
+PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors/")
 
 global _processor
 
@@ -29,86 +27,61 @@ class Processor:
 
 
     def list_processors_json(self) -> str:
-        processors = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if (f.endswith(".cfg") or f.endswith(".json"))]
+        processors = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".json")]
         return json.dumps(processors)
 
 
-    def load_processor_json(self, config: dict) -> None:
-        config_json = json.loads(config)
-        self.name        = config_json.get("name", "")
-        self.stages      = config_json.get("stages", {})
-        self.resources   = config_json.get("resources", {})
-        self.ports       = config_json.get("ports", {})
-        self.rports      = config_json.get("rports", {})
-        self.nBlocks     = config_json.get("nBlocks", 0)
-        self.blkSize     = config_json.get("blkSize", 0)
-        self.mPenalty    = config_json.get("mPenalty", 0)
-        self.mIssueTime  = config_json.get("mIssueTime", 0)
-        self.sched       = config_json.get("sched", "")
+    def load_processor_json(self, data: dict) -> None:
+
+       print("loading json processor");
+
+        if isinstance(data, str):  # if it is a string convert to JSON struct
+            try:
+                cfg = json.loads(data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON: {e}")
+        else:
+            cfg = data
+
+        self.name        = cfg.get("name", "")
+        self.stages      = cfg.get("stages", {})
+        self.resources   = cfg.get("resources", {})
+        self.ports       = cfg.get("ports", {})
+        self.rports      = cfg.get("rports", {})
+        self.nBlocks     = cfg.get("nBlocks", 0)
+        self.blkSize     = cfg.get("blkSize", 0)
+        self.mPenalty    = cfg.get("mPenalty", 0)
+        self.mIssueTime  = cfg.get("mIssueTime", 0)
+        self.sched       = cfg.get("sched", "")
         self.cache       = None
         if self.nBlocks > 0:
             self.cache   = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
 
 
-    def load_processor(self, name: str) -> None:
+    # Load JSON file containing processor specification
+    def load_processor(self, file="") -> None:
+        if file:
+            json_path = PROCESSOR_PATH + f"{file}.json"
+        else:
+            json_path = PROCESSOR_PATH + "baseline.json"
 
-        proc_dir = PROCESSOR_PATH
-        base, ext = Path(name).stem, Path(name).suffix.lower()
+        try:
+           if not os.path.exists(json_path):
+              raise FileNotFoundError(f"File not found: {json_path}")
 
-        # Build candidate paths
-        cfg_path  = proc_dir / (base + ".cfg")
-        json_path = proc_dir / (base + ".json")
+           # Attempt to open the file
+           with open(json_path, "r") as f:
+               processor = json.load(f)
+           self.load_processor_json(processor)
+           return
 
-        # If user explicitly passed .json, or .json exists and .cfg doesn't, load JSON
-        if ext == ".json" or (json_path.exists() and not cfg_path.exists()):
-            p = json_path if ext != ".json" else proc_dir / name
-            if not p.exists():
-                raise FileNotFoundError(f"JSON processor file not found: {p}")
-            text = p.read_text()
-            # this expects a JSON string
-            self.load_processor_json(text)
-            return
+        except FileNotFoundError as e:
+           print(f"Error: {e}")
+        except IOError as e:
+           print(f"I/O Error while opening file: {e}")
+        except Exception as e:
+           print(f"Unexpected error: {e}")
 
-        p = cfg_path if ext != ".cfg" else proc_dir / name
-        if not p.exists():
-            raise FileNotFoundError(f"CFG processor file not found: {p}")
-        config = configparser.ConfigParser(allow_no_value=True)
-        with open(p, "r") as f:
-            config.read_file(f)
-
-        if "general" not in config:
-            raise ValueError(f"No [general] section in {p}")
-
-        self.name   = config.get("general", "name")
-        self.sched  = config.get("general", "scheduler", fallback="greedy")
-
-        self.stages = {stage:int(width) for stage,width
-                                        in config["stage.width"].items()}
-        self.resources = {
-            resource.upper():int(latency) for resource, latency 
-                                          in config["resource.latency"].items()
-        }
-        
-        self.ports = {}
-        for section in config.sections():
-            if section.startswith("port."):
-                port = section[5:]
-                self.ports[port] = list(map(str.upper, config[section]))
-
-        self.rports = {}
-        for port, instrs in self.ports.items():
-            for ins in instrs:
-                self.rports.setdefault(ins, []).append(port)
-
-        self.nBlocks   = int(config.get("cache", "numBlocks"))
-        self.blkSize   = int(config.get("cache", "blockSize"))
-        self.mPenalty  = int(config.get("cache", "missPenalty"))
-        self.mIssueTime= int(config.get("cache", "missIssueTime"))
-
-        self.cache = None
-        if self.nBlocks > 0:
-            self.cache = Cache(self.nBlocks, self.blkSize,
-                               self.mPenalty, self.mIssueTime)
 
     def import_processor_json(self, config: str) -> None:
 

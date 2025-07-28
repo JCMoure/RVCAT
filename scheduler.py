@@ -1,44 +1,39 @@
-from copy        import copy
-import json
-
 from .window      import Window, InstrState
-from .program     import Program
+from .program     import Program, _program
 from .processor   import Processor, _processor
 from .instruction import Instruction
 
 from . import exec_graph as ex
 
+import json
+
 global _scheduler
 
 class Scheduler:
 
-    def __init__(self, processor: Processor) -> None:
-        self.processor = processor
+    def __init__(self) -> None:
+        return
 
-
-    def load_program(self, program: Program, iterations: int=3, window_size: int=100) -> None:
-
-        self.program  = program
-        self.processor.reset()
+    def init_scheduler (self, iterations: int=3, window_size: int=100) -> None:
 
         self.iterations = iterations
         self.window_size= window_size
         self.window     = Window(window_size)
-        self.n          = iterations*self.program.n
+        self.n          = iterations*_program.n
         self.pc         = 0
         self.cycles     = 0
-
-        self.DepEdges   = program.dependence_edges
+        self.DepEdges   = _program.dependence_edges
+        _processor.reset()
 
 
     def next_cycle(self) -> int:
 
-        xw    = self.processor.stages["execute"]
-        rw    = self.processor.stages["retire"]
-        sched = self.processor.sched != "greedy"
+        xw    = _processor.stages["execute"]
+        rw    = _processor.stages["retire"]
+        sched = _processor.sched != "greedy"
 
         issue_queue = {}
-        used_ports  = {port:False for port in self.processor.ports}
+        used_ports  = {port:False for port in _processor.ports}
         MM_access   = -1
 
         for window_idx in range(self.window.count):
@@ -61,25 +56,12 @@ class Scheduler:
             elif instr.state == InstrState.EXECUTE:
                 instr.latency -= 1
                 if instr.latency == 0:
-                    #if instr.substate == InstrState.NONE and instr.memory != MemType.NONE:
-                        # Memory instruction: Cache access
-                    #    mType = 0 if instr.memory == MemType.LOAD else 1
-                    #    instr.latency, result, MM_access = self.processor.cache_access(mType, instr.memAddr, self.cycles)
-                    #    instr.exec_lat += instr.latency   # add extra latency in case of cache miss
-                    
-                    #if instr.latency > 0:
-                    #    if result == 1:
-                    #        instr.substate = InstrState.WAIT_CACHE_MISS
-                    #    else:
-                    #        instr.substate = InstrState.WAIT_CACHE_2ND
-                    #else:
-                        instr.state    = InstrState.WRITE_BACK
-                        instr.substate = InstrState.NONE
+                     instr.state    = InstrState.WRITE_BACK
+                     instr.substate = InstrState.NONE
 
             elif instr.state == InstrState.DISPATCH:
 
                 if instr.substate in [InstrState.NONE, InstrState.WAIT_DATA]:
-                    # need to check data dependencies
                     instr.substate = InstrState.NONE
                   
                     for dependence_offset in self.DepEdges[static_idx]:
@@ -92,8 +74,8 @@ class Scheduler:
                                 break
 
                 if instr.substate != InstrState.WAIT_DATA:
-                    instr_type     = self.program[static_idx].type
-                    resource       = self.processor.get_resource(instr_type)
+                    instr_type     = _program[static_idx].type
+                    resource       = _processor.get_resource(instr_type)
                     latency, ports = resource
                     if not sched:  # Greedy scheduling algorithm
                       if xw:
@@ -144,31 +126,14 @@ class Scheduler:
                   instr.substate  = InstrState.WAIT_BANDWIDTH
                   instr.exec_lat += 1
 
-        retires = self.processor.stages["retire"] - rw
+        retires = _processor.stages["retire"] - rw
         return retires, used_ports, MM_access
 
 
-
     def dispatch(self):
-        dw = self.processor.stages["dispatch"]
+        dw = _processor.stages["dispatch"]
         while dw and not self.window.is_full():
-            static_idx = self.pc % self.program.n
-            # instr      = self.program[static_idx]
-            # if self.processor.cache != None: 
-            #     instr_mem = instr.memory
-            #     addr      = instr.nextaddr
-            #     if instr_mem != MemType.NONE:
-            #         instr.nextaddr = addr + instr.stride
-            #         instr.count +=1
-            #         if instr.count == instr.N:
-            #             instr.count = 0
-            #             instr.nextaddr = instr.addr
-            #     else:
-            #         addr = -1
-            # else:
-            #    instr_mem = MemType.NONE
-            #    addr      = -1
-            # self.window.push(self.cycles, self.pc, static_idx, instr_mem, addr)
+            static_idx = self.pc % _program.n
             self.window.push(self.cycles, self.pc, static_idx, "", 0)
             self.pc += 1
             dw      -= 1
@@ -229,19 +194,18 @@ class Scheduler:
 
 
     def generate_timeline(self):
-
-        rw = self.processor.stages["retire"]
-
-        timeline      = {i:[] for i in range(self.n + self.window.size + rw)}
-        port_timeline = {port:[] for port in self.processor.ports}
-        MM_timeline   = []
-        INSTR_Info    = []
-        ExecGraph     = ex.generate_execution_graph( self.program, self.n, self.window_size, self.DepEdges )
-
+        rw              = _processor.stages["retire"]
         retired         = 0
         self.cycles     = 0
         last_ret_cycle  = 0
         last_disp_cycle = 0
+
+        timeline      = {i:[] for i in range(self.n + self.window.size + rw)}
+        port_timeline = {port:[] for port in _processor.ports}
+        MM_timeline   = []
+        INSTR_Info    = []
+
+        ExecGraph     = ex.generate_execution_graph( _program, self.n, self.window_size, self.DepEdges )
 
         while retired < self.n:
             retires, used_ports, MM_access = self.next_cycle()
@@ -289,121 +253,52 @@ class Scheduler:
         return timeline, port_timeline, MM_timeline, INSTR_Info, critical_path
 
 
-    def compute_results( self, usage, cycles_per_iter, name ):
-        out = ""
-
-        if usage >= 0.98:
-           out += f"\033[96m"
-
-        v1_str = f"{100*usage:0.2f}"
-        v2_str = f"{usage*cycles_per_iter:0.2f}"
-        out += f"  {name:^10}:\t{v1_str:^10}\t{v2_str:^12}\n"
-
-        if usage >= 0.98:
-           out += f"\033[0m"
-
-        return out
-
-
-    def format_analysis(self) -> str:
-        retired         = 0
-        self.cycles     = 0
-        last_ret_cycle  = 0
-        last_disp_cycle = 0
-
-        ports      = self.processor.ports
-        port_usage = {port:0 for port in ports}
-
-        ExecGraph  = ex.generate_execution_graph( self.program, self.n, self.window_size, self.DepEdges )
-
-        while retired < self.n:
-            retires, used_ports, _ = self.next_cycle()
-
-            for port in ports:
-                if used_ports[port]:
-                   port_usage[port] += 1
-
-            for i in range(retires):
-
-                r_instr     = self.window[i]
-                dynamic_idx = r_instr.d_idx
-                if dynamic_idx != retired:
-                    print("ERROR\n")
-
-                disp_latency    = r_instr.disp_cycle - last_disp_cycle
-                last_disp_cycle = r_instr.disp_cycle
-                ret_latency     = self.cycles - last_ret_cycle
-                last_ret_cycle  = self.cycles
-                exec_latency    = r_instr.exec_lat
-                ex.exec_graph_update ( ExecGraph, dynamic_idx, disp_latency, exec_latency, ret_latency )
-
-                retired += 1
-                if retired >= self.n:
-                    break
-
-            self.window.pop(retires)
-            self.dispatch()
-
-        critical_path = ex.longest_path(ExecGraph)
-
-        cycles_per_iter = self.cycles / self.iterations
-        IPC             = self.n / self.cycles
-
-        out  = f"**** Performance Results ****\n\n"
-        out += f"Total Iterations= {self.iterations}, "
-        out += f"Total Instructions= {self.n}, "
-        out += f"Total cycles= {self.cycles}, "
-        out += f"IPC= {IPC:0.2f}\n\n"
-        value1_str = f"{cycles_per_iter:0.2f}"
- 
-        out += f"  Resource  \t Usage(%) \t Cycles/iter.\n"
-        out += f"  --------- \t----------\t ------------\n"
-        out += f"   PROGRAM  :\t          \t{value1_str:^12}\n"
-
-        dw_usage = IPC / self.processor.stages["dispatch"]
-        xw_usage = IPC / self.processor.stages["execute"]
-        rw_usage = IPC / self.processor.stages["retire"]
-
-        out += self.compute_results( dw_usage, cycles_per_iter, "dispatch")
-        out += self.compute_results( xw_usage, cycles_per_iter, "execute" )
-        out += self.compute_results( rw_usage, cycles_per_iter,  "retire" )
-
-        for port in ports:
-           usage = port_usage[port]/self.cycles
-           name  = f"Port {port}"
-           out += self.compute_results( usage, cycles_per_iter, name)
-
-        if self.processor.cache != None:
-           MM_usage, MM_Rd_usage, RdMisses, WrMisses = self.processor.cache.statistics(self.cycles)
-           out += self.compute_results( MM_usage, cycles_per_iter, "MM total BW")
-           out += self.compute_results( MM_Rd_usage, cycles_per_iter, "MM read BW")
-
-           v_str = f"{RdMisses/self.iterations:0.2f}"
-           out  += f"   Read Misses:\t          \t {v_str:^10}\n"
-
-           v_str = f"{WrMisses/self.iterations:0.2f}"
-           out  += f"  Write Misses:\t          \t {v_str:^10}\n"
-
-        out += f"\n  Critical Path\n  -------------\n"
-        out += ex.critical_path_statistics(self.program, critical_path)
-
-        return out
-
-
     def format_timeline(self, niters: int = 3):
 
         global_n = self.n
-        self.n = niters * self.program.n
+        self.n = niters * _program.n
 
         timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline()
         pad_iteration = len(str(self.iterations))
-        pad_i         = len(str(self.program.n))
+        pad_i         = len(str(_program.n))
         pad           = pad_iteration + pad_i + 5
 
         out_cycles = f"{' '*pad}{' '.join([str(c_i%10) for c_i in range(self.cycles)])}\n"
+        
+        port_timeline = {}
+        for port in _processor.ports:
+            port_timeline[port] = [False for i in range(self.cycles)]
+
+        out_timeline = ""
+        pad_list = []
+        for i, cycles in timeline.items():
+            if not cycles or i >= self.n:
+                break
+            iteration = i // _program.n
+            i_mod     = i %  _program.n
+            init_pad  = pad_list[iteration][0] - 1
+            if init_pad < 0:
+              init_pad  = 0
+            medium_pad= cycles[0][0]-init_pad
+            end_pad   = pad_list[iteration][1] - len(cycles) - (init_pad+medium_pad)
+
+            stages = self.generate_timeline_state( i, [s for _,s in cycles], critical_path)
+
+            out_timeline += f"{'  '*init_pad}[{iteration:{pad_iteration}},{i_mod:{pad_i}}]{'  '*medium_pad}"
+            out_timeline += f"{stages}{'  '*end_pad}     "
+            out_timeline += f"{_program.instr_str(i_mod)}"
+            out_timeline += f" (P.{INSTR_Info[i][1]})"
+
+            port_timeline[ INSTR_Info[i][1] ][ INSTR_Info[i][0] ] = True
+
+            if iteration == 0:
+                 out_timeline += f" {_program.instr_type_str(i_mod)}"
+
+            if INSTR_Info[i][2] >= 0:
+                 out_timeline += f" [Addr= {INSTR_Info[i][2]}]"
 
         port_timeline = {}
-        for port in self.processor.ports:
+        for port in _processor.ports:
             port_timeline[port] = [False for i in range(self.cycles)]
 
         Cycle = 0
@@ -422,8 +317,8 @@ class Scheduler:
         for i, cycles in timeline.items():
             if not cycles or i >= self.n:
                 break
-            iteration  = i // self.program.n
-            i_mod      = i % self.program.n
+            iteration  = i // _program.n
+            i_mod      = i % _program.n
             if i_mod == 0:
               pad_list.append([cycles[0][0],0])
 
@@ -432,8 +327,8 @@ class Scheduler:
         for i, cycles in timeline.items():
             if not cycles or i >= self.n:
                 break
-            iteration = i // self.program.n
-            i_mod     = i % self.program.n
+            iteration = i // _program.n
+            i_mod     = i % _program.n
             init_pad  = pad_list[iteration][0] - 1
             if init_pad < 0:
               init_pad  = 0
@@ -444,13 +339,13 @@ class Scheduler:
 
             out_timeline += f"{'  '*init_pad}[{iteration:{pad_iteration}},{i_mod:{pad_i}}]{'  '*medium_pad}"
             out_timeline += f"{stages}{'  '*end_pad}     "
-            out_timeline += f"{self.program.instr_str(i_mod)}"
+            out_timeline += f"{_program.instr_str(i_mod)}"
             out_timeline += f" (P.{INSTR_Info[i][1]})"
 
             port_timeline[ INSTR_Info[i][1] ][ INSTR_Info[i][0] ] = True
 
             if iteration == 0:
-                 out_timeline += f" {self.program.instr_type_str(i_mod)}"
+                 out_timeline += f" {_program.instr_type_str(i_mod)}"
 
             if INSTR_Info[i][2] >= 0:
                  out_timeline += f" [Addr= {INSTR_Info[i][2]}]"
@@ -467,87 +362,16 @@ class Scheduler:
         return out_cycles + out_Ports + out_MM + "\n" + out_cycles + out_timeline
 
 
-
-    def format_timeline2(self, niters: int = 3) -> str:
-
-        global_n = self.n
-        self.n = niters * self.program.n
-
-        timeline, port_timeline, MM_timeline, INSTR_Info, critical_path = self.generate_timeline()
-        pad_iteration = len(str(self.iterations))
-        pad_i         = len(str(self.program.n))
-        pad           = pad_iteration + pad_i + 5
-
-        out = f"{' '*pad}{' '.join([str(c_i%10) for c_i in range(self.cycles)])}\n"
-        for port, cycles in port_timeline.items():
-            usage = " ".join(["X" if used else " " for used in cycles])
-            out += f"P.{port:{pad_iteration+pad_i+2}} {usage}\n"
-
-        Cycle = 0
-        usage = "  "
-        for use_time in MM_timeline:
-            if use_time >= self.cycles:
-                break
-            usage += "  "*(use_time-Cycle-1)+"# "
-            Cycle = use_time
-
-        name = "MM"
-        out += f"{name:{pad_iteration+pad_i+2}} {usage}\n"
-
-        out += f"\n{' '*pad}{' '.join([str(c_i%10) for c_i in range(self.cycles)])}\n"
-
-        pad_list = []
-        for i, cycles in timeline.items():
-            if not cycles or i >= self.n:
-                break
-            iteration  = i // self.program.n
-            i_mod      = i % self.program.n
-            if i_mod == 0:
-              pad_list.append([cycles[0][0],0])
-            
-            pad_list[iteration][1] = cycles[0][0] + len(cycles)
-
-        for i, cycles in timeline.items():
-            if not cycles or i >= self.n:
-                break
-            iteration = i // self.program.n
-            i_mod     = i % self.program.n
-            init_pad  = pad_list[iteration][0] - 1
-            if init_pad < 0:
-              init_pad  = 0
-            medium_pad= cycles[0][0]-init_pad
-            end_pad   = pad_list[iteration][1] - len(cycles) - (init_pad+medium_pad)
-
-            stages = self.generate_timeline_state( i, [s for _,s in cycles], critical_path)
-
-            out += f"{'  '*init_pad}[{iteration:{pad_iteration}},{i_mod:{pad_i}}]{'  '*medium_pad}"
-            out += f"{stages}{'  '*end_pad}     "
-            out += f"{self.program.instr_str(i_mod)}"
-            out += f" ({INSTR_Info[i][3]})"
-
-            if iteration == 0:
-                 out += f" {self.program.instr_type_str(i_mod)}"
-
-            if INSTR_Info[i][4] >= 0:
-                 out += f" [Addr= {INSTR_Info[i][4]}]"
-
-            out   += "\n"
-
-        self.n = global_n
-
-        return out
-
-
     def format_analysis_json(self) -> str:
         retired         = 0
         self.cycles     = 0
         last_ret_cycle  = 0
         last_disp_cycle = 0
 
-        ports      = self.processor.ports
+        ports      = _processor.ports
         port_usage = {port:0 for port in ports}
 
-        ExecGraph  = ex.generate_execution_graph( self.program, self.n, self.window_size, self.DepEdges )
+        ExecGraph  = ex.generate_execution_graph( _program, self.n, self.window_size, self.DepEdges )
 
         while retired < self.n:
             retires, used_ports, _ = self.next_cycle()
@@ -557,7 +381,6 @@ class Scheduler:
                    port_usage[port] += 1
 
             for i in range(retires):
-
                 r_instr     = self.window[i]
                 dynamic_idx = r_instr.d_idx
                 if dynamic_idx != retired:
@@ -578,6 +401,7 @@ class Scheduler:
             self.dispatch()
 
         critical_path = ex.longest_path(ExecGraph)
+        critical_path = ex.longest_path(ExecGraph)
 
         cycles_per_iter = self.cycles / self.iterations
         IPC             = self.n / self.cycles
@@ -595,14 +419,14 @@ class Scheduler:
            usage = port_usage[port]/self.cycles
            out["ports"][str(port)] = usage*100
 
-        if self.processor.cache != None:
-            MM_usage, MM_Rd_usage, RdMisses, WrMisses = self.processor.cache.statistics(self.cycles)
+        if _processor.cache != None:
+            MM_usage, MM_Rd_usage, RdMisses, WrMisses = _processor.cache.statistics(self.cycles)
             out["MM_usage"] = MM_usage
             out["MM_read_usage"] = MM_Rd_usage
             out["read_misses"] = RdMisses
             out["write_misses"] = WrMisses
 
-        out["critical_path"] = ex.critical_path_statistics_json(self.program, critical_path)
+        out["critical_path"] = ex.critical_path_statistics_json(_program, critical_path)
         return json.dumps(out)
 
-_scheduler = Scheduler(_processor)
+_scheduler = Scheduler()

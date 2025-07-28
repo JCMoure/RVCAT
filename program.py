@@ -1,4 +1,3 @@
-
 from .instruction import Instruction
 from .processor   import Processor, _processor
 from pathlib      import Path
@@ -6,7 +5,7 @@ from pathlib      import Path
 import importlib.resources
 import json, os
 
-PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples")
+PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples/")
 
 global _program
 
@@ -35,6 +34,7 @@ class Program:
     # return JSON structure of current program
     def json(self):
         return json.dumps(self.__dict__(), indent=2)
+
 
     # return JSON values of current program-class instance
     def __dict__(self):
@@ -127,8 +127,7 @@ class Program:
         if self.n != len(instrs):
             raise ValueError(f"JSON corrupted n={self.n} is not number of instructions={len(instrs)}")
          
-        self.processor = _processor
-        self.processor.reset()
+        _processor.reset()
 
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)
@@ -333,7 +332,7 @@ class Program:
         latencies = []
 
         for i in range(self.n):
-            resource = self.processor.get_resource(self.instruction_list[i].type)
+            resource = _processor.get_resource(self.instruction_list[i].type)
             if not resource:
                 latency = 1
             else:
@@ -347,12 +346,12 @@ class Program:
 
         # return list of port_usage masks for ordered list of instructions
 
-        ports        = list( self.processor.ports.keys() )
+        ports        = list( _processor.ports.keys() )
         n_ports      = len ( ports )
         resources    = []
 
         for i in range(self.n):
-            resource   = self.processor.get_resource(self.instruction_list[i].type)
+            resource   = _processor.get_resource(self.instruction_list[i].type)
             instr_mask = 0
             mask_bit   = 1
             for j in range(n_ports):
@@ -370,7 +369,7 @@ class Program:
         for i in range(self.n):
             instruction = self.instruction_list[i]
             instr_type  = instruction.type
-            resource    = self.processor.get_resource(instr_type)
+            resource    = _processor.get_resource(instr_type)
             if not resource:
                 latency = 1
                 ports = ()
@@ -385,8 +384,8 @@ class Program:
               out += f"P{ports[j]},"
 
             out += f"P{ports[n-1]}\n"
-
         return out
+
 
 
     def show_instruction_memory_trace(self) -> str:
@@ -582,7 +581,7 @@ class Program:
 
     def show_performance_analysis(self) -> str:
 
-        ports    = list( self.processor.ports.keys() )
+        ports    = list( _processor.ports.keys() )
         n_ports  = len ( ports )
 
         recurrent_paths = self.cyclic_paths
@@ -597,8 +596,8 @@ class Program:
             if latency_iter > max_latency:
                 max_latency = latency_iter
 
-        dw_cycles = self.n / self.processor.stages["dispatch"]
-        rw_cycles = self.n / self.processor.stages["retire"]
+        dw_cycles = self.n / _processor.stages["dispatch"]
+        rw_cycles = self.n / _processor.stages["retire"]
 
         # generate all combinations of ports
         n_combinations = 1
