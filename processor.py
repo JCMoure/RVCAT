@@ -33,7 +33,7 @@ class Processor:
 
     def load_processor_json(self, data: dict) -> None:
 
-       print("loading json processor");
+        print("loading json processor");
 
         if isinstance(data, str):  # if it is a string convert to JSON struct
             try:
