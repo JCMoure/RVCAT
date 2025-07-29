@@ -77,9 +77,9 @@ class Program:
     # Load JSON file containing program specification
     def load_program(self, file="") -> None:
         if file:
-            json_path = PROGRAM_PATH + f"{file}.json"
+            json_path = PROGRAM_PATH + f"/{file}.json"
         else:
-            json_path = PROGRAM_PATH + "baseline.json"
+            json_path = PROGRAM_PATH + "/baseline.json"
 
         try:
            if not os.path.exists(json_path):
