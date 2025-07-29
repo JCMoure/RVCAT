@@ -8,6 +8,7 @@ import json, os
 
 PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples")
 
+global _program
 
 class Program:
 
@@ -696,4 +697,4 @@ class Program:
         return self.instruction_list[i%self.n]
 
 
-global _program = Program()
+_program = Program()

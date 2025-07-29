@@ -7,6 +7,7 @@ from . import exec_graph as ex
 
 import json
 
+global _scheduler
 
 class Scheduler:
 
@@ -427,4 +428,4 @@ class Scheduler:
         out["critical_path"] = ex.critical_path_statistics_json(_program, critical_path)
         return json.dumps(out)
 
-global _scheduler = Scheduler()
+_scheduler = Scheduler()
