@@ -7,7 +7,6 @@ from . import exec_graph as ex
 
 import json
 
-global _scheduler
 
 class Scheduler:
 
@@ -23,7 +22,6 @@ class Scheduler:
         self.pc         = 0
         self.cycles     = 0
         self.DepEdges   = _program.dependence_edges
-        _processor.reset()
 
 
     def next_cycle(self) -> int:
@@ -429,4 +427,4 @@ class Scheduler:
         out["critical_path"] = ex.critical_path_statistics_json(_program, critical_path)
         return json.dumps(out)
 
-_scheduler = Scheduler()
+global _scheduler = Scheduler()

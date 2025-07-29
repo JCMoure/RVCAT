@@ -5,9 +5,9 @@ from pathlib      import Path
 import importlib.resources
 import json, os
 
+
 PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples")
 
-global _program
 
 class Program:
 
@@ -77,9 +77,9 @@ class Program:
     # Load JSON file containing program specification
     def load_program(self, file="") -> None:
         if file:
-            json_path = PROGRAM_PATH + f"/{file}.json"
+            json_path = PROGRAM_PATH + f"{file}.json"
         else:
-            json_path = PROGRAM_PATH + "/baseline.json"
+            json_path = PROGRAM_PATH + "baseline.json"
 
         try:
            if not os.path.exists(json_path):
@@ -127,8 +127,6 @@ class Program:
         if self.n != len(instrs):
             raise ValueError(f"JSON corrupted n={self.n} is not number of instructions={len(instrs)}")
          
-        _processor.reset()
-
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)
         self.loop_carried = [] # index to list of variable names which are loop-carried
@@ -697,4 +695,5 @@ class Program:
     def __getitem__(self, i: int) -> Instruction:
         return self.instruction_list[i%self.n]
 
-_program = Program()
+
+global _program = Program()

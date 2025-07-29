@@ -8,7 +8,6 @@ import json, os
 
 PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
 
-global _processor
 
 class Processor:
 
@@ -155,4 +154,4 @@ class Processor:
             "mIssueTime": self.mIssueTime
         }
 
-_processor = Processor()
+global _processor = Processor()
