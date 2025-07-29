@@ -5,7 +5,7 @@ from pathlib      import Path
 import importlib.resources
 import json, os
 
-PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples/")
+PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples")
 
 global _program
 
@@ -50,7 +50,7 @@ class Program:
 
 
     # write program to disk, either JSON structure or String specifying Json
-    def export_program(self, data):
+    def import_program_json(self, data):
 
         if isinstance(data, str):  # if data is a string, convert to JSON structure
             try:

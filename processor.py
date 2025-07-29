@@ -6,7 +6,7 @@ from pathlib      import Path
 import importlib.resources
 import json, os
 
-PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors/")
+PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
 
 global _processor
 
