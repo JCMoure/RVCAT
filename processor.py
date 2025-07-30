@@ -61,9 +61,9 @@ class Processor:
     # Load JSON file containing processor specification
     def load_processor(self, file="") -> None:
         if file:
-            json_path = PROCESSOR_PATH + f"{file}.json"
+            json_path = PROCESSOR_PATH.joinpath(f"{file}.json")
         else:
-            json_path = PROCESSOR_PATH + "baseline.json"
+            json_path = PROCESSOR_PATH.joinpath("baseline.json")
 
         try:
            if not os.path.exists(json_path):
