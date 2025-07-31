@@ -1,12 +1,7 @@
 from .instruction import Instruction
 from .processor   import Processor, _processor
-from pathlib      import Path
 
-import importlib.resources
-import json, os
-
-
-PROGRAM_PATH = importlib.resources.files("rvcat").joinpath("examples")
+import json, os, files
 
 global _program
 
@@ -50,68 +45,23 @@ class Program:
         return data
 
 
-    # write program to disk, either JSON structure or String specifying Json
-    def import_program_json(self, data):
-
-        if isinstance(data, str):  # if data is a string, convert to JSON structure
-            try:
-                cfg = json.loads(data)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON: {e}")
-        else:
-            cfg = data
-
-        out_path: Path = PROGRAM_PATH.joinpath(f"{cfg['name']}.json")
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(out_path, "w") as f:
-            json.dump(cfg, f, indent=2)
-
-
-    # return JSON structure containing names of programs found in PROGRAM_PATH
-    def list_programs_json(self) -> str:
-        p = ['.'.join(f.split('.')[:-1]) for f in os.listdir(PROGRAM_PATH) if f.endswith(".json")]
-        return json.dumps(p)
+    def save(self, name="") -> None:
+        if name == "":
+            name = self.name
+        files.export_json( self.json(), name, False)
 
 
     # Load JSON file containing program specification
-    def load_program(self, file="") -> None:
+    def load(self, file="") -> None:
         if file:
-            json_path = PROGRAM_PATH.joinpath(f"{file}.json")
+            json_name = f"{file}.json"
         else:
-            json_path = PROGRAM_PATH.joinpath("baseline.json")
+            json_name = "baseline.json"
 
-        try:
-           if not os.path.exists(json_path):
-              raise FileNotFoundError(f"File not found: {json_path}")
+        cfg = files.load_json ( json_name, False ) ## be sure is JSON struct
 
-           # Attempt to open the file
-           with open(json_path, "r") as f:
-               program = json.load(f)
-           self.load_program_json(program)
-           return
-
-        except FileNotFoundError as e:
-           print(f"Error: {e}")
-        except IOError as e:
-           print(f"I/O Error while opening file: {e}")
-        except Exception as e:
-           print(f"Unexpected error: {e}")
-
-
-    # load JSON structure into program instance
-    def load_program_json(self, data):
-
-        print("loading json program");
-
-        if isinstance(data, str):  # if it is a string convert to JSON struct
-            try:
-                cfg = json.loads(data)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON: {e}")
-        else:
-            cfg = data
+        if isinstance(cfg, str):  # if it is a string convert to JSON struct
+            raise ValueError(f"Invalid JSON")
 
         self.name   = cfg.get("name", "")
         self.n      = cfg.get("n", 0)
@@ -363,8 +313,12 @@ class Program:
 
 
     def show_code(self) -> str:
+        pad = 0
+        for i in range(self.n):
+            pad = max( pad, len(self.instruction_list[i].text))
+
         InsMessage = "INSTRUCTIONS"
-        out = f"   {InsMessage:20}     TYPE      LATENCY  EXECUTION PORTS\n"
+        out = f"   {InsMessage:{pad}}     TYPE      LATENCY  EXECUTION PORTS\n"
         for i in range(self.n):
             instruction = self.instruction_list[i]
             instr_type  = instruction.type
@@ -375,7 +329,7 @@ class Program:
             else:
                 latency, ports = resource
             out += f"{i:{len(str(self.n))}}:"
-            out += f"{instruction.text:20} : "
+            out += f"{instruction.text:{pad}} : "
             out += f"{instr_type:18} : {latency:^3} : "
 
             n = len(ports)
@@ -383,12 +337,6 @@ class Program:
               out += f"P{ports[j]},"
 
             out += f"P{ports[n-1]}\n"
-        return out
-
-
-
-    def show_instruction_memory_trace(self) -> str:
-        out = ""
         return out
 
 
@@ -430,7 +378,7 @@ class Program:
             out +=  "{\n  style=\"filled,rounded\"; color=blue; "
             out += f"fillcolor={colors[iter_id-1]};\n"
             out +=  "  node [style=filled, shape=rectangle, fillcolor=lightgrey,"
-            out +=  " fontname=\"Consolas\", fontsize=16, margin=0.0];\n"
+            out +=  " fontname=\"Consolas\", fontsize=16, margin=0.22];\n"
 
             for inst_id in range(self.n):
                 lat = latencies[inst_id]
@@ -441,7 +389,7 @@ class Program:
             out +=  "}\n"
 
     
-       # generate cluster of input variables
+        # generate cluster of input variables
         out += " subgraph inVAR {\n"
         out += "  node[style=box,color=invis,width=0.5,heigth=0.5,fixedsize=true,fontname=\"Courier-bold\"];\n"
 
@@ -678,6 +626,51 @@ class Program:
         return out
 
 
+    def show_dependencies(self) -> str:
+
+        out = "............... Instruction Data-Dependences ......................"
+ 
+        for inst_id in range(self.n):
+            instruction = self.instruction_list[inst_id]
+            out += f"\n{inst_id:{len(str(self.n))}}: {instruction.text:20}: "
+
+            for dep in self.inst_dependence_list[inst_id]:
+                dep_id = dep[0]
+                if dep_id == -1:  ## constant input
+                  dep_var = self.constants[ dep[1] ]
+                  out += f"\033[96m.. --> {dep_var:5};\033[0m "
+
+                elif dep_id == -3:  ## read-only input variable
+                  dep_var = self.variables[ dep[1] ]
+                  out += f"\033[94m.. --> {dep_var:5};\033[0m "
+
+                else:
+                  dep_var = self.variables[dep[1]]
+                  if dep_id >= inst_id:
+                    out += f"\033[91m"
+                  out += f"{dep_id:2} --> {dep_var:5}; "
+                  if dep_id >= inst_id:
+                    out += f"\033[0m"
+
+        out += "\n\n Variables        : "
+        for var in self.variables:
+            out += f"{var},"
+        out += "\n Constants        :\033[96m "
+        for var in self.constants:
+            out += f"{var},"
+        out += "\n\033[0m Read-Only vars   :\033[94m "
+        for var in self.read_only:
+            out += f"{var},"
+        out += "\n\033[0m Loop-Carried vars:\033[91m "
+        for (prod_id, var) in self.loop_carried:
+            out += f"{prod_id} --> {var},"
+
+        out += "\033[0m\n..................................................................................\n"
+        print("Recurrent Paths: ", self.cyclic_paths)
+
+        return out
+
+
     def instr_str(self, i: int) -> str:
         return self.instruction_list[i].text
  
@@ -687,10 +680,7 @@ class Program:
 
 
     def __repr__(self) -> str:
-        out = ""
-        for i in range(self.n):
-            out += f"{i:{len(str(self.n))}}: {self.instruction_list[i]}\n"
-        return out
+        return json.dumps(self.__dict__(), indent=2)
 
 
     def __getitem__(self, i: int) -> Instruction:

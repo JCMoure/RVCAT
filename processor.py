@@ -1,12 +1,5 @@
-from typing       import Optional
-from .instruction import Instruction
-from .cache       import Cache
-
-from pathlib      import Path
-import importlib.resources
-import json, os
-
-PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
+from .cache import Cache
+import json, os, files
  
 global _processor
 
@@ -26,22 +19,18 @@ class Processor:
         self.sched     = "greedy"
 
 
-    def list_processors_json(self) -> str:
-        processors = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".json")]
-        return json.dumps(processors)
+    # Load JSON file containing processor specification
+    def load(self, file="") -> None:
 
-
-    def load_processor_json(self, data: dict) -> None:
-
-        print("loading json processor");
-
-        if isinstance(data, str):  # if it is a string convert to JSON struct
-            try:
-                cfg = json.loads(data)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON: {e}")
+        if file:
+            json_name = f"{file}.json"
         else:
-            cfg = data
+            json_name = "baseline.json"
+
+        cfg = files.load_json ( json_name, True ) ## be sure is JSON struct
+
+        if isinstance(cfg, str):  # if it is a string convert to JSON struct
+            raise ValueError(f"Invalid JSON")
 
         self.name        = cfg.get("name", "")
         self.stages      = cfg.get("stages", {})
@@ -58,47 +47,10 @@ class Processor:
             self.cache   = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
 
 
-    # Load JSON file containing processor specification
-    def load_processor(self, file="") -> None:
-        if file:
-            json_path = PROCESSOR_PATH.joinpath(f"{file}.json")
-        else:
-            json_path = PROCESSOR_PATH.joinpath("baseline.json")
-
-        try:
-           if not os.path.exists(json_path):
-              raise FileNotFoundError(f"File not found: {json_path}")
-
-           # Attempt to open the file
-           with open(json_path, "r") as f:
-               processor = json.load(f)
-           self.load_processor_json(processor)
-           return
-
-        except FileNotFoundError as e:
-           print(f"Error: {e}")
-        except IOError as e:
-           print(f"I/O Error while opening file: {e}")
-        except Exception as e:
-           print(f"Unexpected error: {e}")
-
-
-    def import_processor_json(self, config: str) -> None:
-
-        if isinstance(config, str):
-            try:
-                cfg = json.loads(config)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON: {e}")
-        else:
-            cfg = config
-
-        out_path: Path = PROCESSOR_PATH.joinpath(f"{cfg['name']}.json")
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(out_path, "w") as f:
-            json.dump(cfg, f, indent=2)
+    def save(self, name="") -> None:
+        if name == "":
+            name = self.name
+        files.export_json( self.json(), name, True)
 
 
     def reset(self) -> None:
@@ -138,6 +90,10 @@ class Processor:
 
 
     def json(self) -> str:
+        return json.dumps(self.__dict__())
+
+
+    def __repr__(self) -> str:
         return json.dumps(self.__dict__())
 
 
