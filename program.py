@@ -1,7 +1,7 @@
 from .instruction import Instruction
 from .processor   import Processor, _processor
-
-import json, os, files
+from .            import files
+import json
 
 global _program
 
@@ -35,7 +35,7 @@ class Program:
     # return JSON values of current program-class instance
     def __dict__(self):
         data = {
-            "name": os.path.splitext(os.path.basename(self.name))[0],
+            "name": self.name,
             "n":    self.n,
         }
         data["instruction_list"]=[]

@@ -1,5 +1,6 @@
 from .cache import Cache
-import json, os, files
+from . import files
+import json
  
 global _processor
 
