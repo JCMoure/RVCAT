@@ -17,9 +17,8 @@ class Instruction:
 
 
     def from_json(data: dict):
-        instr = Instruction()
 
-        # Override fields explicitly
+        instr = Instruction()
         instr.type     = data.get("type", "")
         instr.text     = data.get("text", "")
         instr.destin   = data.get("destin", "")
@@ -120,7 +119,7 @@ class Program:
         instrs = []
         for entry in cfg.get("instruction_list", []):
             instr_dict = json.loads(entry) if isinstance(entry, str) else entry
-            instr = Instruction.from_json(instr_dict)
+            instr      = Instruction.from_json(instr_dict)
             instrs.append(instr)
 
         self.instruction_list = instrs
@@ -306,9 +305,9 @@ class Program:
                 if (dep[0] >= 0):
                     dependency_graph[dep[0]].append(inst_id)
 
-        self.cyclic_paths = []
-        paths             = [ [i]  for i in start_instrs]
-        visited           = { i:[] for i in range(self.n)}
+        cyc_paths = []
+        paths     = [ [i]  for i in start_instrs]
+        visited   = { i:[] for i in range(self.n)}
 
         while paths:
             path = paths.pop()
@@ -320,8 +319,16 @@ class Program:
                 else:
                     if len(set(path)) != len(path):  # some inst_id appears twice
                         path = path[path.index(last):]
-                        if path not in self.cyclic_paths:
-                            self.cyclic_paths.append(path)
+                        if path not in cyc_paths:
+                            cyc_paths.append(path)
+
+        self.cyclic_paths = []
+        for path in cyc_paths:
+            path = path[:-1]      # remove last element (repeated as the first one)
+            min_val   = min(path)            # find minimum value
+            min_index = path.index(min_val)  # find position of minimum value
+            path = path[min_index:]+path[:min_index+1]
+            self.cyclic_paths.append(path)
 
 
     def get_instr_latencies(self) -> list:
@@ -363,12 +370,15 @@ class Program:
 
 
     def show_code(self) -> str:
-        pad = 0
+
+        instr_pad, type_pad = 0, 0
         for i in range(self.n):
-            pad = max( pad, len(self.instruction_list[i].text))
+            instr_pad = max( instr_pad, len(self.instruction_list[i].text))
+            type_pad  = max( type_pad,  len(self.instruction_list[i].type))
 
         InsMessage = "INSTRUCTIONS"
-        out = f"   {InsMessage:{pad}}     TYPE      LATENCY  EXECUTION PORTS\n"
+        TypeMessage= "TYPE"
+        out = f"   {InsMessage:{instr_pad}}   {TypeMessage:{type_pad}} LATENCY EXECUTION PORTS\n"
         for i in range(self.n):
             instruction = self.instruction_list[i]
             instr_type  = instruction.type
@@ -378,9 +388,8 @@ class Program:
                 ports = ()
             else:
                 latency, ports = resource
-            out += f"{i:{len(str(self.n))}}:"
-            out += f"{instruction.text:{pad}} : "
-            out += f"{instr_type:18} : {latency:^3} : "
+            out += f"{i:{len(str(self.n))}}: {instruction.text:{instr_pad}} : "
+            out += f"{instr_type:{type_pad}} : {latency:^3} : "
 
             n = len(ports)
             for j in range(n-1):
@@ -428,7 +437,8 @@ class Program:
             out +=  "{\n  style=\"filled,rounded\"; color=blue; "
             out += f"fillcolor={colors[iter_id-1]};\n"
             out +=  "  node [style=filled, shape=rectangle, fillcolor=lightgrey,"
-            out +=  " fontname=\"Consolas\", fontsize=16, margin=0.22];\n"
+            out +=  " width=2.0, fixedsize=true, margin=\"0.1,0.1\","
+            out +=  " fontname=\"Consolas\", fontsize=16, margin=0.0];\n"
 
             for inst_id in range(self.n):
                 lat = latencies[inst_id]
@@ -592,8 +602,11 @@ class Program:
             if latency_iter > max_latency:
                 max_latency = latency_iter
 
-        dw_cycles = self.n / _processor.stages["dispatch"]
-        rw_cycles = self.n / _processor.stages["retire"]
+        dw = _processor.stages["dispatch"]
+        rw = _processor.stages["retire"]
+
+        dw_cycles = self.n / dw
+        rw_cycles = self.n / rw
 
         # generate all combinations of ports
         n_combinations = 1
@@ -603,10 +616,11 @@ class Program:
         port_cycles = 0
         for mask in range(1,n_combinations):
             uses = 0
+            pw   = bin(mask).count("1")
             for instr_mask in resources:
                 if (mask & instr_mask) == instr_mask:
                      uses += 1
-            cycles = uses / bin(mask).count("1")
+            cycles = uses / pw
             if port_cycles < cycles:
                 port_cycles = cycles
 
@@ -623,28 +637,24 @@ class Program:
         out  = f"Performance is {perf_bound} and minimum execution time is {cycles_limit:0.2f} cycles per loop iteration\n"
         out += f" Throughput-limit is {max_cycles:0.2f} cycles/iteration\n"
         out += f"  Latency-limit   is {max_latency:0.2f} cycles/iteration\n"
+
         out += f"\n*** Throughput ********\n"
-        tot=0;
         if dw_cycles == max_cycles:
-           out += f"dispatch stage"
-           tot = tot+1
+           out += f"dispatch stage: {self.n} instr. per iter. / {dw} instr. per cycle"
+           out += f" = {dw_cycles:0.2f}\n"
 
         if rw_cycles == max_cycles:
-           if (tot != 0):
-              out += ", "
-           tot = tot+1
-           out += f"retire stage"
+           out += f" retire  stage: {self.n} instr. per iter. / {rw} instr. per cycle"
+           out += f" = {rw_cycles:0.2f}\n"
 
         for mask in range(1,n_combinations):
             uses = 0
+            pw   = bin(mask).count("1")
             for instr_mask in resources:
-                if (mask & instr_mask) == instr_mask:
+                if (mask & instr_mask) == instr_mask:  ## instruction only uses ports in mask
                      uses += 1
-            cycles = uses / bin(mask).count("1")
+            cycles = uses / pw
             if cycles == max_cycles:
-                if (tot != 0):
-                  out += ", "
-                tot = tot+1
                 port_str = ""
                 mask_bit=1
                 for j in range(n_ports):
@@ -652,25 +662,25 @@ class Program:
                         port_str += f"P{ports[j]}+"
                     mask_bit *= 2
 
-                out += f"{port_str[:-1]}"
+                out += f"{port_str[:-1]:14}: {uses} instr. per iter. / {pw} instr. per cycle"
+                out += f" = {cycles:0.2f}\n"
 
-        out += f"\n\n"
-        out += f"*** Cyclic Dependence Paths:\n"
+        out += f"\n*** Cyclic Dependence Paths:\n"
         for path in recurrent_paths:
             latency = sum(latencies[i] for i in path[:-1])
             iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
             latency_iter = latency / iters
 
-            if latency_iter == max_latency:
-                out += " "
-                for i in path[:-1]:
-                    out += f"[{i}] ({latencies[i]}) --> "
-                out += f"[{path[-1]}] : "
-                out += f"("
-                if len(path)>2:
-                  for i in path[:-2]:
-                    out += f"{latencies[i]}+"
-                out += f"{latencies[path[-2]]})cycles / {iters} iter. = {latency_iter}\n"
+            out += " "
+            for i in path[:-1]:
+                 out += f"[{i}] --> "
+            out += f"[{path[-1]}] : "
+            out += f"("
+            if len(path)>2:
+                for i in path[:-2]:
+                  out += f"{latencies[i]}+"
+
+            out += f"{latencies[path[-2]]})cycles / {iters} iter. = {latency_iter:0.2f}\n"
 
         return out
 
