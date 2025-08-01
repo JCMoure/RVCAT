@@ -525,7 +525,6 @@ class Program:
         return out + "}\n"
 
 
-
     def show_performance_analysis(self) -> str:
 
         ports    = list( _processor.ports.keys() )
