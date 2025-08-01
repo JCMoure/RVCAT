@@ -9,9 +9,9 @@ PROGRAM_PATH   = importlib.resources.files("rvcat").joinpath("examples")
 def load_json(name, proc=True) -> json:
 
     if proc:
-      json_path = PROCESSOR_PATH + name
+      json_path = PROCESSOR_PATH.joinpath(name)
     else:
-      json_path = PROGRAM_PATH + name
+      json_path = PROGRAM_PATH.joinpath(name)
 
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"File not found: {json_path}")
