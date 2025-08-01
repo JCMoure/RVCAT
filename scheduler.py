@@ -1,7 +1,6 @@
 from .window      import Window, InstrState
-from .program     import Program, _program
+from .program     import Instruction, Program, _program
 from .processor   import Processor, _processor
-from .instruction import Instruction
 
 from . import exec_graph as ex
 
@@ -14,7 +13,8 @@ class Scheduler:
     def __init__(self) -> None:
         return
 
-    def init_scheduler (self, iterations: int=3, window_size: int=100) -> None:
+
+    def init (self, iterations: int=3, window_size: int=100) -> None:
 
         self.iterations = iterations
         self.window_size= window_size
@@ -282,16 +282,17 @@ class Scheduler:
             end_pad   = pad_list[iteration][1] - len(cycles) - (init_pad+medium_pad)
 
             stages = self.generate_timeline_state( i, [s for _,s in cycles], critical_path)
+            instr  = _program[i_mod]
 
             out_timeline += f"{'  '*init_pad}[{iteration:{pad_iteration}},{i_mod:{pad_i}}]{'  '*medium_pad}"
             out_timeline += f"{stages}{'  '*end_pad}     "
-            out_timeline += f"{_program.instr_str(i_mod)}"
+            out_timeline += f"{instr.text}"
             out_timeline += f" (P.{INSTR_Info[i][1]})"
 
             port_timeline[ INSTR_Info[i][1] ][ INSTR_Info[i][0] ] = True
 
             if iteration == 0:
-                 out_timeline += f" {_program.instr_type_str(i_mod)}"
+                out_timeline += f" {instr.type}"
 
             if INSTR_Info[i][2] >= 0:
                  out_timeline += f" [Addr= {INSTR_Info[i][2]}]"
@@ -427,5 +428,6 @@ class Scheduler:
 
         out["critical_path"] = ex.critical_path_statistics_json(_program, critical_path)
         return json.dumps(out)
+
 
 _scheduler = Scheduler()

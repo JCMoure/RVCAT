@@ -42,9 +42,9 @@ def load_json(name, proc=True) -> json:
 def list_json(proc=True) -> str:
   
     if proc:
-        l = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if (f.endswith(".json"))]
+        l = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".json")]
     else:
-        l = ['.'.join(f.split('.')[:-1]) for f in os.listdir(PROGRAM_PATH) if f.endswith(".json")]
+        l = [f.split('.')[:-1] for f in os.listdir(PROGRAM_PATH)   if f.endswith(".json")]
 
     return json.dumps(l)
 

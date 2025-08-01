@@ -1,9 +1,50 @@
-from .instruction import Instruction
 from .processor   import Processor, _processor
 from .            import files
 import json
 
 global _program
+
+class Instruction:
+
+    def __init__(self) -> None:
+        self.type     = ""
+        self.text     = ""
+        self.destin   = ""
+        self.source1  = ""
+        self.source2  = ""
+        self.source3  = ""
+        self.constant = ""
+
+
+    def from_json(data: dict):
+        instr = Instruction()
+
+        # Override fields explicitly
+        instr.type     = data.get("type", "")
+        instr.text     = data.get("text", "")
+        instr.destin   = data.get("destin", "")
+        instr.source1  = data.get("source1", "")
+        instr.source2  = data.get("source2", "")
+        instr.source3  = data.get("source3", "")
+        instr.constant = data.get("constant", "")
+        return instr
+
+
+    def json(self) -> str:
+        return {
+            "type":     self.type,
+            "text":     self.text,
+            "destin":   self.destin,
+            "source1":  self.source1,
+            "source2":  self.source2,
+            "source3":  self.source3,
+            "constant": self.constant
+        }
+
+
+    def __repr__(self) -> str:
+        return f"{self.text: <16}"
+
 
 class Program:
 
@@ -45,6 +86,14 @@ class Program:
         return data
 
 
+    def __repr__(self) -> str:
+        return json.dumps(self.__dict__(), indent=2)
+
+
+    def __getitem__(self, i: int) -> Instruction:
+        return self.instruction_list[i%self.n]
+
+
     def save(self, name="") -> None:
         if name == "":
             name = self.name
@@ -53,6 +102,7 @@ class Program:
 
     # Load JSON file containing program specification
     def load(self, file="") -> None:
+
         if file:
             json_name = f"{file}.json"
         else:
@@ -668,22 +718,6 @@ class Program:
         print("Recurrent Paths: ", self.cyclic_paths)
 
         return out
-
-
-    def instr_str(self, i: int) -> str:
-        return self.instruction_list[i].text
- 
-
-    def instr_type_str(self, i: int) -> str:
-        return self.instruction_list[i].type
-
-
-    def __repr__(self) -> str:
-        return json.dumps(self.__dict__(), indent=2)
-
-
-    def __getitem__(self, i: int) -> Instruction:
-        return self.instruction_list[i%self.n]
 
 
 _program = Program()
