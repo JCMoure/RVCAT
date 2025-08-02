@@ -29,7 +29,7 @@ class Instruction:
         return instr
 
 
-    def json(self) -> str:
+    def json(self) -> dict:
         return {
             "type":     self.type,
             "text":     self.text,
@@ -274,11 +274,12 @@ class Program:
             offsets = []
             for dep in self.inst_dependence_list[inst_id]:
                 dep_id = dep[0]  # ID of instruction providing data to instruction inst_id
-                if dep_id >= inst_id: # loop carried dependence
+                if dep_id >= 0:  # is a data dependence
+                  if dep_id >= inst_id: # loop carried dependence
                     offset = inst_id - dep_id + self.n
-                else:
+                  else:
                     offset = inst_id - dep_id
-                offsets.append(offset)
+                  offsets.append(offset)
 
             self.dependence_edges.append(offsets)
 
@@ -437,7 +438,7 @@ class Program:
             out +=  "{\n  style=\"filled,rounded\"; color=blue; "
             out += f"fillcolor={colors[iter_id-1]};\n"
             out +=  "  node [style=filled, shape=rectangle, fillcolor=lightgrey,"
-            out +=  " width=2.0, fixedsize=true, margin=\"0.1,0.1\","
+            out +=  " width=4.0, fixedsize=true, margin=\"0.1,0.1\","
             out +=  " fontname=\"Consolas\", fontsize=16, margin=0.0];\n"
 
             for inst_id in range(self.n):
@@ -672,8 +673,16 @@ class Program:
             latency_iter = latency / iters
 
             out += " "
-            for i in path[:-1]:
-                 out += f"[{i}] --> "
+            for i in range( len(path)-1 ):
+              cur_ins  = path[i]
+              next_ins = path[i+1]
+              for dep in self.inst_dependence_list[next_ins]:
+                 if dep[0] == cur_ins:
+                    var  = dep[1]
+                    label= self.variables[var]
+
+              out += f"[{cur_ins}] -({label})-> "
+
             out += f"[{path[-1]}] : "
             out += f"("
             if len(path)>2:
