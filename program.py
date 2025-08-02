@@ -16,7 +16,7 @@ class Instruction:
         self.constant = ""
 
 
-    def from_json(data: dict) -> Instruction:
+    def from_json(data: dict):
 
         instr = Instruction()
         instr.type     = data.get("type", "")
