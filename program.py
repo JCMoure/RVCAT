@@ -428,7 +428,7 @@ class Program:
                 max_latency = latency_iter
             max_iters = max( iters, max_iters )
 
-        out  = "digraph G {\n  rankdir=\"TB\"; splines=spline; newrank=true;\n"
+        out  = "digraph G {\n  rankdir=\"LR\"; splines=spline; newrank=true;\n"
         out += "  edge [fontname=\"Consolas\"; color=black; penwidth=1.5; "
         out += "fontsize=14; fontcolor=blue];\n"
 
@@ -438,8 +438,7 @@ class Program:
             out +=  "{\n  style=\"filled,rounded\"; color=blue; "
             out += f"fillcolor={colors[iter_id-1]};\n"
             out +=  "  node [style=filled, shape=rectangle, fillcolor=lightgrey,"
-            out +=  " width=2.5, fixedsize=true, margin=\"0.1,0.1\","
-            out +=  " fontname=\"Consolas\", fontsize=16, margin=0.05];\n"
+            out +=  " margin=\"0.1,0.1\", fontname=\"Consolas\", fontsize=16, margin=0.05];\n"
 
             for inst_id in range(self.n):
                 lat = latencies[inst_id]
