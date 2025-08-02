@@ -16,7 +16,7 @@ class Instruction:
         self.constant = ""
 
 
-    def from_json(data: dict):
+    def from_json(data: dict) -> Instruction:
 
         instr = Instruction()
         instr.type     = data.get("type", "")
@@ -68,12 +68,12 @@ class Program:
 
 
     # return JSON structure of current program
-    def json(self):
+    def json(self) -> str:
         return json.dumps(self.__dict__(), indent=2)
 
 
     # return JSON values of current program-class instance
-    def __dict__(self):
+    def __dict__(self) -> dict:
         data = {
             "name": self.name,
             "n":    self.n,
@@ -262,7 +262,7 @@ class Program:
         self.get_cyclic_paths()
 
 
-    def generate_dependence_info (self):
+    def generate_dependence_info (self) -> None:
 
         # Used by execution scheduler to control data dependencies during execution
         # For each static instruction, list of dependent offsets 
@@ -284,7 +284,7 @@ class Program:
             self.dependence_edges.append(offsets)
 
 
-    def get_cyclic_paths(self):
+    def get_cyclic_paths(self) -> None:
 
         # return list of cyclic dependence paths: [[3, 3], [2, 0, 2]],
         # numbers are instr-IDs: same ID appears at begin & end
@@ -438,8 +438,8 @@ class Program:
             out +=  "{\n  style=\"filled,rounded\"; color=blue; "
             out += f"fillcolor={colors[iter_id-1]};\n"
             out +=  "  node [style=filled, shape=rectangle, fillcolor=lightgrey,"
-            out +=  " width=4.0, fixedsize=true, margin=\"0.1,0.1\","
-            out +=  " fontname=\"Consolas\", fontsize=16, margin=0.0];\n"
+            out +=  " width=2.5, fixedsize=true, margin=\"0.1,0.1\","
+            out +=  " fontname=\"Consolas\", fontsize=16, margin=0.05];\n"
 
             for inst_id in range(self.n):
                 lat = latencies[inst_id]
@@ -650,10 +650,14 @@ class Program:
 
         for mask in range(1,n_combinations):
             uses = 0
-            pw   = bin(mask).count("1")
-            for instr_mask in resources:
+            inst_str= ""
+            for i in range( len(resources) ):
+                instr_mask = resources[i]
                 if (mask & instr_mask) == instr_mask:  ## instruction only uses ports in mask
                      uses += 1
+                     inst_str += f"{i},"
+
+            pw   = bin(mask).count("1")
             cycles = uses / pw
             if cycles == max_cycles:
                 port_str = ""
@@ -663,8 +667,8 @@ class Program:
                         port_str += f"P{ports[j]}+"
                     mask_bit *= 2
 
-                out += f"{port_str[:-1]:14}: {uses} instr. per iter. / {pw} instr. per cycle"
-                out += f" = {cycles:0.2f}\n"
+                out += f"Ports: {port_str[:-1]}, Instr.: {inst_str[:-1]} --> {uses}"
+                out += f" instr. per iter. / {pw} instr. per cycle = {cycles:0.2f}\n"
 
         out += f"\n*** Cyclic Dependence Paths:\n"
         for path in recurrent_paths:
@@ -734,8 +738,6 @@ class Program:
             out += f"{prod_id} --> {var},"
 
         out += "\033[0m\n..................................................................................\n"
-        print("Recurrent Paths: ", self.cyclic_paths)
-
         return out
 
 
