@@ -406,7 +406,8 @@ class Program:
         return out
 
 
-    def show_graphviz(self, show_const=False,    show_readonly=False, 
+    def show_graphviz(self, num_iters= 0,
+                            show_const=False,    show_readonly=False, 
                             show_internal=False, show_latency=False) -> str:
 
         colors = ["lightblue", "greenyellow", "lightyellow", 
@@ -428,6 +429,8 @@ class Program:
                 max_latency = latency_iter
             max_iters = max( iters, max_iters )
 
+        max_iters = max (max_iters, num_iters)
+
         out  = "digraph G {\n  rankdir=\"LR\"; splines=spline; newrank=true;\n"
         out += "  edge [fontname=\"Consolas\"; color=black; penwidth=1.5; "
         out += "fontsize=14; fontcolor=blue];\n"
@@ -435,35 +438,39 @@ class Program:
         # generate clusters of nodes: one cluster per loop iteration
         for iter_id in range(1, max_iters+1):
             out += f" subgraph cluster_{iter_id} "
-            out +=  "{\n  style=\"filled,rounded\"; color=blue; "
+            out +=  "{\n  style=\"filled,rounded\"; color=blue; fontname=\"Consolas\"; "
             out += f"fillcolor={colors[iter_id-1]};\n"
-            out +=  "  node [style=filled, shape=rectangle, fillcolor=lightgrey,"
-            out +=  " margin=\"0.1,0.1\", fontname=\"Consolas\", fontsize=16, margin=0.05];\n"
+            out +=  "  node [style=filled, shape=rect, fillcolor=lightgrey,"
+            out +=  " margin=\"0.6,0.05\", fontname=\"Consolas\", fontsize=14];\n"
 
             for inst_id in range(self.n):
                 lat = latencies[inst_id]
+                txt = self.instruction_list[inst_id].text
                 out += f"  i{iter_id}s{inst_id} ["
                 if show_latency:
                   out += f"xlabel=<<B><font color=\"red\" point-size=\"16\">{lat}</font></B>>, "           
-                out += f"label=< <B>{inst_id}: {self.instruction_list[inst_id].text}</B> >];\n"
+                out +=  "label=<<B>"
+                out += f"{inst_id}: {txt}"
+                out +=  "</B>>];\n"
+
             out +=  "}\n"
 
     
         # generate cluster of input variables
         out += " subgraph inVAR {\n"
-        out += "  node[style=box,color=invis,width=0.5,heigth=0.5,fixedsize=true,fontname=\"Courier-bold\"];\n"
+        out += "  node[style=box,color=invis,width=0.8,heigth=0.2,fixedsize=true,fontname=\"Consolas\"];\n"
 
         for const_id in range( len(self.constants) ):
            var = self.constants[const_id]
-           out += f"  Const{const_id} [label=\"{var}\", fontcolor=grey];\n"
+           out += f"  Const{const_id} [label=<<B>{var}</B>>, fontcolor=grey];\n"
 
         for RdOnly_id in range( len(self.read_only) ):
            var = self.read_only[RdOnly_id]
-           out += f"  RdOnly{RdOnly_id} [label=\"{var}\", fontcolor=green];\n"
+           out += f"  RdOnly{RdOnly_id} [label=<<B>{var}</B>>, fontcolor=green];\n"
 
         for LoopCar_id in range( len(self.loop_carried) ):
            (_,var) = self.loop_carried[LoopCar_id]
-           out += f"  LoopCar{LoopCar_id} [label=\"{var}\", fontcolor=red];\n"
+           out += f"  LoopCar{LoopCar_id} [label=<<B>{var}</B>>, fontcolor=red];\n"
 
         out += " }\n"
 
@@ -483,11 +490,11 @@ class Program:
         # generate cluster of output variables
         out += " subgraph outVAR {\n"
         out += "  node [style=box, color=invis, fontcolor=red,"
-        out += " width=0.5, heigth=0.5, fixedsize=true, fontname=\"Courier-bold\"];\n"
+        out += " width=0.8, heigth=0.2, fixedsize=true, fontname=\"Consolas\"];\n"
 
         for LoopCar_id in range( len(self.loop_carried) ):
            (_,var) = self.loop_carried[LoopCar_id]
-           out += f"  OutCar{LoopCar_id} [label=\"{var}\"];\n"
+           out += f"  OutCar{LoopCar_id} [label=<<B>{var}</B>>];\n"
 
         out += " }\n"
 
@@ -559,10 +566,10 @@ class Program:
                       in_var = f"i{iter_id-1}s{i_id}"
                       label  = self.variables[var]
 
-              if not is_recurrent and not show_internal:
-                  out += f"  {in_var} -> i{iter_id}s{inst_id} [color=invis];\n"
+              if is_recurrent or show_internal:
+                out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", {arrow}];\n"
               else:
-                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", {arrow}];\n"
+                out += f"  {in_var} -> i{iter_id}s{inst_id} [color=invis];\n"
 
 
         # generate dependence links to loop-carried variables in final iteration
