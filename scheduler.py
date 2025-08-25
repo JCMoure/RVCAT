@@ -254,6 +254,87 @@ class Scheduler:
 
     def format_timeline(self, niters: int = 3):
 
+        global_n     = self.n
+        global_iters = self.iterations
+
+        self.iterations = niters
+        self.n          = niters * _program.n
+
+        timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline()
+        pad_iteration = len(str(niters))
+        pad_i         = len(str(_program.n))
+        pad           = pad_iteration + pad_i + 5
+
+        out_cycles = f"{' '*pad}{' '.join([str(c_i%10) for c_i in range(self.cycles)])}\n"
+
+        port_timeline = {}
+        for port in _processor.ports:
+            port_timeline[port] = [False for i in range(self.cycles)]
+
+        out_timeline = ""
+        pad_list = []
+        for i, cycles in timeline.items():
+            if not cycles or i >= self.n:
+                break
+            iteration  = i // _program.n
+            i_mod      = i %  _program.n
+            if i_mod == 0:
+              pad_list.append([cycles[0][0],0])
+
+            pad_list[iteration][1] = cycles[0][0] + len(cycles)
+
+        for i, cycles in timeline.items():
+            if not cycles or i >= self.n:
+                break
+            iteration = i // _program.n
+            i_mod     = i %  _program.n
+            init_pad  = pad_list[iteration][0] - 1
+            if init_pad < 0:
+              init_pad  = 0
+            medium_pad= cycles[0][0]-init_pad
+            end_pad   = pad_list[iteration][1] - len(cycles) - (init_pad+medium_pad)
+
+            stages = self.generate_timeline_state( i, [s for _,s in cycles], critical_path)
+            instr  = _program[i_mod]
+
+            out_timeline += f"{'  '*init_pad}[{iteration:{pad_iteration}},{i_mod:{pad_i}}]{'  '*medium_pad}"
+            out_timeline += f"{stages}{'  '*end_pad}     "
+            out_timeline += f"{instr.text}"
+            out_timeline += f" (P.{INSTR_Info[i][1]})"
+
+            port_timeline[ INSTR_Info[i][1] ][ INSTR_Info[i][0] ] = True
+
+            if iteration == 0:
+                out_timeline += f" {instr.type}"
+
+            if INSTR_Info[i][2] >= 0:
+                 out_timeline += f" [Addr= {INSTR_Info[i][2]}]"
+
+            out_timeline   += "\n"
+
+        Cycle = 0
+        usage = "  "
+        for use_time in MM_timeline:
+            if use_time >= self.cycles:
+                break
+            usage += "  "*(use_time-Cycle-1)+"# "
+            Cycle = use_time
+
+        name = "MM"
+        out_MM = f"{name:{pad_iteration+pad_i+2}} {usage}\n"
+
+        out_Ports = ""
+        for port, cycles in port_timeline.items():
+            usage = " ".join(["X" if used else " " for used in cycles])
+            out_Ports += f"P.{port:{pad_iteration+pad_i+2}} {usage}\n"
+
+        self.n          = global_n
+        self.iterations = global_iters
+
+        return out_cycles + out_Ports + out_MM + "\n" + out_cycles + out_timeline
+
+
+    def format_timeline2(self, niters: int = 3):
         global_n = self.n
         self.n = niters * _program.n
 
