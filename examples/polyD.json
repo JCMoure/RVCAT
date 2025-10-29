@@ -1,7 +1,7 @@
 {
   "n": 7,
   "name": "polyD",
-  "instructions": [
+  "instruction_list": [
     {
       "type": "MEM.LOAD.DP",
       "text": "tmp = A[i]",

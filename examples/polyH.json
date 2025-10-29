@@ -1,7 +1,7 @@
 {
-  "n": 6,
   "name": "polyH",
-  "instructions": [
+  "n": 6,
+  "instruction_list": [
     {
       "type": "MEM.LOAD.DP",
       "text": " tmp = A[i]",

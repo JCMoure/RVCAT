@@ -1,7 +1,7 @@
 {
-  "n": 9,
   "name": "example",
-  "instructions": [
+  "n": 9,
+  "instruction_list": [
     {
       "type": "INT.MOVE",
       "text": "R = T",
