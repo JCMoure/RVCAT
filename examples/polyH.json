@@ -1,0 +1,60 @@
+{
+  "n": 6,
+  "name": "polyH",
+  "instructions": [
+    {
+      "type": "MEM.LOAD.DP",
+      "text": " tmp = A[i]",
+      "destin": "tmp",
+      "source1": "i",
+      "source2": "",
+      "source3": "",
+      "constant": "A",
+    },
+    {
+      "type": "FLOAT.MUL.DP",
+      "text": "res = res * x",
+      "destin": "res",
+      "source1": "res",
+      "source2": "x",
+      "source3": "",
+      "constant": "",
+    },
+    {
+      "type": "FLOAT.ADD.DP",
+      "text": " res = res + tmp",
+      "destin": "res",
+      "source1": "res",
+      "source2": "tmp",
+      "source3": "",
+      "constant": "",
+    },
+    {
+      "type": "INT.ARITH",
+      "text": "i = i - 1",
+      "destin": "i",
+      "source1": "i",
+      "source2": "",
+      "source3": "",
+      "constant": "-1"
+    },
+    {
+      "type": "INT.ARITH",
+      "text": "c = i < 0",
+      "destin": "c",
+      "source1": "i",
+      "source2": "",
+      "source3": "",
+      "constant": "0"
+    },
+    {
+      "type": "BRANCH",
+      "text": "if c go back",
+      "destin": "",
+      "source1": "c",
+      "source2": "",
+      "source3": "",
+      "constant": ""
+    }
+  ]
+}

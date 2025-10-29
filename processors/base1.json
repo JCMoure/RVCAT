@@ -1,8 +1,8 @@
 {
-  "name": "B2",
+  "name": "base1",
   "stages": {
-    "dispatch": 3,
-    "execute": 3,
+    "dispatch": 4,
+    "execute": 4,
     "retire": 4
   },
   "resources": {
@@ -24,20 +24,22 @@
   "ports": {
     "0": [
       "INT",
-      "BRANCH",
-      "MEM.STR",
-      "MEM.LOAD",
-      "MEM.VLOAD",
-      "MEM.VSTR"
+      "BRANCH"
     ],
     "1": [
+      "MEM.LOAD",
+      "MEM.VLOAD",
+      "MEM.STR",
+      "MEM.VSTR"
+    ],
+    "2": [
       "INT",
       "FLOAT.MUL",
       "FLOAT.FMA",
       "VFLOAT.MUL",
       "VFLOAT.FMA"
     ],
-    "2": [
+    "3": [
       "INT",
       "FLOAT.ADD",
       "FLOAT.DIV",
@@ -48,51 +50,51 @@
   "rports": {
     "INT": [
       "0",
-      "1",
-      "2"
+      "2",
+      "3"
     ],
     "BRANCH": [
       "0"
     ],
-    "MEM.STR": [
-      "0"
-    ],
     "MEM.LOAD": [
-      "0"
+      "1"
     ],
     "MEM.VLOAD": [
-      "0"
+      "1"
+    ],
+    "MEM.STR": [
+      "1"
     ],
     "MEM.VSTR": [
-      "0"
+      "1"
     ],
     "FLOAT.MUL": [
-      "1"
+      "2"
     ],
     "FLOAT.FMA": [
-      "1"
+      "2"
     ],
     "VFLOAT.MUL": [
-      "1"
+      "2"
     ],
     "VFLOAT.FMA": [
-      "1"
+      "2"
     ],
     "FLOAT.ADD": [
-      "2"
+      "3"
     ],
     "FLOAT.DIV": [
-      "2"
+      "3"
     ],
     "FLOAT.SQRT": [
-      "2"
+      "3"
     ],
     "VFLOAT.ADD": [
-      "2"
+      "3"
     ]
   },
   "nBlocks": 0,
   "blkSize": 8,
   "mPenalty": 12,
-  "mIssueTime": 8
+  "mIssueTime": 10
 }

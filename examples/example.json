@@ -1,15 +1,15 @@
 {
   "n": 9,
-  "name": "rec2",
-  "instruction_list": [
+  "name": "example",
+  "instructions": [
     {
-      "type": "INT.ARITH",
+      "type": "INT.MOVE",
       "text": "R = T",
       "destin": "R",
       "source1": "T",
       "source2": "",
       "source3": "",
-      "constant": ""
+      "constant": "",
     },
     {
       "type": "MEM.LOAD.DP",
@@ -18,7 +18,7 @@
       "source1": "i",
       "source2": "",
       "source3": "",
-      "constant": "A"
+      "constant": "A",
     },
     {
       "type": "FLOAT.ADD.DP",
@@ -27,7 +27,7 @@
       "source1": "R",
       "source2": "Two",
       "source3": "",
-      "constant": ""
+      "constant": "",
     },
     {
       "type": "FLOAT.ADD.DP",
@@ -36,7 +36,7 @@
       "source1": "T",
       "source2": "J",
       "source3": "",
-      "constant": ""
+      "constant": "",
     },
     {
       "type": "MEM.LOAD.DP",
@@ -45,16 +45,16 @@
       "source1": "i",
       "source2": "",
       "source3": "",
-      "constant": "B"
+      "constant": "B",
     },
     {
       "type": "FLOAT.MUL.DP",
       "text": "J = J * R",
-      "destin": "J",
-      "source1": "J",
-      "source2": "R",
-      "source3": "",
-      "const": ""
+      "rd": "J",
+      "rs1": "J",
+      "rs2": "R",
+      "rs3": "",
+      "imm": "",
     },
     {
       "type": "INT.ARITH",

@@ -1,5 +1,5 @@
 {
-  "name": "rec",
+  "name": "recV2",
   "n": 10,
   "instruction_list": [
     {
@@ -22,45 +22,45 @@
     },
     {
       "type": "FLOAT.MUL.DP",
-      "text": "tmp2 = Vprev * Z035",
+      "text": "tmp2 = tmp1 * Z025",
       "destin": "tmp2",
-      "source1": "Vprev",
+      "source1": "tmp1",
+      "source2": "Z025",
+      "source3": "",
+      "constant": ""
+    },
+    {
+      "type": "FLOAT.MUL.DP",
+      "text": "tmp3 = tmp1 * Z_060",
+      "destin": "tmp3",
+      "source1": "tmp1",
+      "source2": "Z_060",
+      "source3": "",
+      "constant": ""
+    },
+    {
+      "type": "FLOAT.ADD.DP",
+      "text": "tmp2 = tmp2 + Z035",
+      "destin": "tmp2",
+      "source1": "tmp2",
       "source2": "Z035",
       "source3": "",
       "constant": ""
     },
     {
       "type": "FLOAT.MUL.DP",
-      "text": "tmp3 = Vprev * Z025",
-      "destin": "tmp3",
-      "source1": "Vprev",
-      "source2": "Z025",
-      "source3": "",
-      "constant": ""
-    },
-    {
-      "type": "FLOAT.ADD.DP",
-      "text": "tmp3 = tmp3 + Z_060",
-      "destin": "tmp3",
-      "source1": "tmp3",
-      "source2": "Z_060",
-      "source3": "",
-      "constant": ""
-    },
-    {
-      "type": "FLOAT.MUL.DP",
-      "text": "tmp3 = tmp3 * tmp1",
-      "destin": "tmp3",
-      "source1": "tmp3",
-      "source2": "tmp1",
-      "source3": "",
-      "constant": ""
-    },
-    {
-      "type": "FLOAT.ADD.DP",
-      "text": "Vprev = tmp2 + tmp3",
+      "text": "Vprev = Vprev * tmp2",
       "destin": "Vprev",
-      "source1": "tmp2",
+      "source1": "Vprev",
+      "source2": "tmp2",
+      "source3": "",
+      "constant": ""
+    },
+    {
+      "type": "FLOAT.ADD.DP",
+      "text": "Vprev = Vprev + tmp3",
+      "destin": "Vprev",
+      "source1": "Vprev",
       "source2": "tmp3",
       "source3": "",
       "constant": ""
