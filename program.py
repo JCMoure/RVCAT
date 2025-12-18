@@ -410,6 +410,10 @@ class Program:
                             show_const=False,    show_readonly=False, 
                             show_internal=False, show_latency=False) -> str:
 
+        def escape_html(text: str) -> str:
+            """Escape HTML special characters for Graphviz HTML-like labels."""
+          return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+
         colors = ["lightblue", "greenyellow", "lightyellow", 
                   "lightpink", "lightgrey",   "lightcyan", "lightcoral"]
 
@@ -445,7 +449,7 @@ class Program:
 
             for inst_id in range(self.n):
                 lat = latencies[inst_id]
-                txt = self.instruction_list[inst_id].text
+                txt = escape_html(self.instruction_list[inst_id].text)
                 out += f"  i{iter_id}s{inst_id} ["
                 if show_latency:
                   out += f"xlabel=<<B><font color=\"red\" point-size=\"16\">{lat}</font></B>>, "           
