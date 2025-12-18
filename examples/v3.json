@@ -1,36 +1,27 @@
 {
-  "n": 10,
-  "name": "polyD_U2",
+  "n": 11,
+  "name": "v3",
   "instruction_list": [
     {
-      "type": "MEM.LOAD.DP",
-      "text": "tmp1 = A[i]",
+      "type": "MEM.LOAD.SP",
+      "text": "tmp1 = V[i]",
       "destin": "tmp1",
       "source1": "i",
       "source2": "",
       "source3": "",
-      "constant": "A"
+      "constant": "V"
     },
     {
-      "type": "MEM.LOAD.DP",
-      "text": "tmp2 = A[i+1]",
+      "type": "MEM.LOAD.SP",
+      "text": "tmp2 = W[i]",
       "destin": "tmp2",
       "source1": "i",
       "source2": "",
       "source3": "",
-      "constant": "A+1"
+      "constant": "W"
     },
     {
-      "type": "FLOAT.MUL.DP",
-      "text": "tmp2 = tmp2 * x",
-      "destin": "tmp2",
-      "source1": "tmp2",
-      "source2": "x",
-      "source3": "",
-      "constant": ""
-    },
-    {
-      "type": "FLOAT.ADD.DP",
+      "type": "FLOAT.ADD.SP",
       "text": "tmp1 = tmp1 + tmp2",
       "destin": "tmp1",
       "source1": "tmp1",
@@ -39,29 +30,47 @@
       "constant": ""
     },
     {
-      "type": "FLOAT.MUL.DP",
-      "text": "tmp1 = tmp1 * xpwr",
+      "type": "MEM.LOAD.SP",
+      "text": "tmp3 = V[i+1]",
+      "destin": "tmp3",
+      "source1": "i",
+      "source2": "",
+      "source3": "",
+      "constant": "V+1"
+    },
+    {
+      "type": "MEM.LOAD.SP",
+      "text": "tmp4 = W[i+1]",
+      "destin": "tmp4",
+      "source1": "i",
+      "source2": "",
+      "source3": "",
+      "constant": "W+1"
+    },
+    {
+      "type": "FLOAT.ADD.SP",
+      "text": "tmp3 = tmp3 + tmp4",
+      "destin": "tmp3",
+      "source1": "tmp3",
+      "source2": "tmp4",
+      "source3": "",
+      "constant": ""
+    },
+    {
+      "type": "FLOAT.ADD.SP",
+      "text": "tmp1 = tmp1 + tmp3",
       "destin": "tmp1",
       "source1": "tmp1",
-      "source2": "xpwr",
+      "source2": "tmp3",
       "source3": "",
       "constant": ""
     },
     {
-      "type": "FLOAT.ADD.DP",
-      "text": "res = res + tmp1",
-      "destin": "res",
-      "source1": "res",
+      "type": "FLOAT.ADD.SP",
+      "text": "sum = sum + tmp1",
+      "destin": "sum",
+      "source1": "sum",
       "source2": "tmp1",
-      "source3": "",
-      "constant": ""
-    },
-    {
-      "type": "FLOAT.MUL.DP",
-      "text": "xpwr = xpwr * x2",
-      "destin": "xpwr",
-      "source1": "xpwr",
-      "source2": "x2",
       "source3": "",
       "constant": ""
     },
@@ -90,7 +99,7 @@
       "source1": "c",
       "source2": "",
       "source3": "",
-      "constant": ""
-    }	
+      "const": ""
+    }
   ]
 }

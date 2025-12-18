@@ -9,7 +9,7 @@
       "source1": "i",
       "source2": "",
       "source3": "",
-      "constant": "A",
+      "constant": "A"
     },
     {
       "type": "FLOAT.MUL.DP",
@@ -18,7 +18,7 @@
       "source1": "tmp",
       "source2": "xpwr",
       "source3": "",
-      "constant": "",
+      "constant": ""
     },
     {
       "type": "FLOAT.ADD.DP",
@@ -27,7 +27,7 @@
       "source1": "res",
       "source2": "tmp",
       "source3": "",
-      "constant": "",
+      "constant": ""
     },
     {
       "type": "FLOAT.MUL.DP",
@@ -36,7 +36,7 @@
       "source1": "xpwr",
       "source2": "x",
       "source3": "",
-      "constant": "",
+      "constant": ""
     },
     {
       "type": "INT.ARITH",

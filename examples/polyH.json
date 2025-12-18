@@ -4,12 +4,12 @@
   "instruction_list": [
     {
       "type": "MEM.LOAD.DP",
-      "text": " tmp = A[i]",
+      "text": "tmp = A[i]",
       "destin": "tmp",
       "source1": "i",
       "source2": "",
       "source3": "",
-      "constant": "A",
+      "constant": "A"
     },
     {
       "type": "FLOAT.MUL.DP",
@@ -18,16 +18,16 @@
       "source1": "res",
       "source2": "x",
       "source3": "",
-      "constant": "",
+      "constant": ""
     },
     {
       "type": "FLOAT.ADD.DP",
-      "text": " res = res + tmp",
+      "text": "res = res + tmp",
       "destin": "res",
       "source1": "res",
       "source2": "tmp",
       "source3": "",
-      "constant": "",
+      "constant": ""
     },
     {
       "type": "INT.ARITH",
@@ -36,7 +36,7 @@
       "source1": "i",
       "source2": "",
       "source3": "",
-      "constant": "-1"
+      "constant": "1"
     },
     {
       "type": "INT.ARITH",
