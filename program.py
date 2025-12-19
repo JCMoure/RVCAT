@@ -436,8 +436,7 @@ class Program:
         max_iters = max (max_iters, num_iters)
 
         out  = "digraph G {\n  rankdir=\"LR\"; splines=spline; newrank=true;\n"
-        out += "  edge [fontname=\"Consolas\"; color=black; penwidth=1.5; "
-        out += "fontsize=14; fontcolor=blue];\n"
+        out += "  edge [fontname=\"courier\"; color=black; penwidth=1.5; fontcolor=blue];\n"
 
         # generate clusters of nodes: one cluster per loop iteration
         for iter_id in range(1, max_iters+1):
@@ -445,15 +444,15 @@ class Program:
             out +=  "{\n  style=\"filled,rounded\"; color=blue; "
             out += f"fillcolor={colors[iter_id-1]};\n"
             out +=  "  node [style=filled, shape=rect, fillcolor=lightgrey,"
-            out +=  " margin=\"0.05,0.05\", fontname=\"Consolas\", fontsize=14];\n"
+            out +=  " margin=\"0.05,0\", fontname=\"courier\"];\n"
 
             for inst_id in range(self.n):
                 lat = latencies[inst_id]
                 txt = escape_html(self.instruction_list[inst_id].text)
                 out += f"  i{iter_id}s{inst_id} ["
-                if show_latency:
-                  out += f"xlabel=<<B><font color=\"red\" point-size=\"16\">{lat}</font></B>>, "
                 out +=  "label=<<B>"
+                if show_latency:
+                  out += f"<FONT COLOR=\"red\">({lat})</FONT> "
                 out += f"{inst_id}: {txt}"
                 out +=  "</B>>];\n"
 
@@ -462,7 +461,7 @@ class Program:
     
         # generate cluster of input variables
         out += " subgraph inVAR {\n"
-        out += "  node[style=box,color=invis,width=0.6,heigth=0.2,fixedsize=true,fontname=\"Consolas\"];\n"
+        out += "  node[style=box, color=invis, fixedsize=false, fontname=\"courier\"];\n"
 
         for const_id in range( len(self.constants) ):
            var = self.constants[const_id]
@@ -493,8 +492,7 @@ class Program:
 
         # generate cluster of output variables
         out += " subgraph outVAR {\n"
-        out += "  node [style=box, color=invis, fontcolor=red,"
-        out += " width=0.6, heigth=0.2, fixedsize=true, fontname=\"Consolas\"];\n"
+        out += "  node [style=box, color=invis, fontcolor=red, fixedsize=false, fontname=\"courier\"];\n"
 
         for LoopCar_id in range( len(self.loop_carried) ):
            (_,var) = self.loop_carried[LoopCar_id]
