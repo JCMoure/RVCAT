@@ -1,9 +1,9 @@
 # rvcat
-RISC-V Code Analysis Tool
+Machine Code Analysis Tool
 
 ## Overview
-This is a RISC-V assembly code execution simulation tool for the performance
-analysis of small programs from a computer architecture educational standpoint.
+This is a machine code execution simulation tool for the performance analysis of small programs 
+from a computer architecture educational standpoint.
 One of the major similar projects is the `llvm-mca` tool, from the LLVM project.
 The tool is tailored to be used as a kernel of a web-based interactive application.
 
@@ -12,4 +12,5 @@ The tool is tailored to be used as a kernel of a web-based interactive applicati
 
 ## Authors
 Saúl Adserias Valero
+
 Juan Carlos Moure
