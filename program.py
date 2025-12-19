@@ -430,7 +430,7 @@ class Program:
         latencies       = self.get_instr_latencies()
 
         max_latency    = 0   # maximum latency per iteration
-        max_iters      = 0   # maximum number of iterations for cyclic path
+        min_iters      = 0   # minimum number of iterations for cyclic path
         path_latencies = []  # latencies of cyclic paths
 
         for path in recurrent_paths:
@@ -440,9 +440,9 @@ class Program:
             path_latencies.append(latency_iter)
             if latency_iter > max_latency:
                 max_latency = latency_iter
-            max_iters = max( iters, max_iters )
+            min_iters = max( iters, min_iters )
 
-        max_iters = max (max_iters, num_iters)
+        max_iters = max (min_iters, num_iters)
 
         out  = "digraph G {\n  rankdir=\"LR\"; splines=spline; newrank=true;\n"
         out += "  edge [fontname=\"courier\"; color=black; penwidth=1.5; fontcolor=blue];\n"
@@ -463,7 +463,9 @@ class Program:
                   out +=  "label=<<B>"
                   if show_latency:
                     out += f"<FONT COLOR=\"red\">({lat})</FONT> "
-                  out += f"{inst_id}: {txt}"
+                  out += f"{inst_id}"
+                  if not show_internal and (num_iters <= min_iters):
+                    out += f": {txt}"
                   out +=  "</B>>];\n"
 
             out +=  "}\n"
@@ -581,9 +583,6 @@ class Program:
 
               if is_recurrent or show_internal:
                   out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", {arrow}];\n"
-              # else:
-              #    out += f"  {in_var} -> i{iter_id}s{inst_id} [color=invis];\n"
-
 
         # generate dependence links to loop-carried variables in final iteration
         for LoopCar_id in range( len(self.loop_carried) ):
