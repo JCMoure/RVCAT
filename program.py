@@ -1,5 +1,5 @@
-from .processor   import Processor, _processor
-from .            import files
+from .processor import Processor, _processor
+from . import files
 import json
 
 global _program
@@ -462,7 +462,7 @@ class Program:
     
         # generate cluster of input variables
         out += " subgraph inVAR {\n"
-        out += "  node[style=box,color=invis,width=0.2,heigth=0.2,fixedsize=true,fontname=\"Consolas\"];\n"
+        out += "  node[style=box,color=invis,width=0.6,heigth=0.2,fixedsize=true,fontname=\"Consolas\"];\n"
 
         for const_id in range( len(self.constants) ):
            var = self.constants[const_id]
@@ -494,7 +494,7 @@ class Program:
         # generate cluster of output variables
         out += " subgraph outVAR {\n"
         out += "  node [style=box, color=invis, fontcolor=red,"
-        out += " width=0.2, heigth=0.2, fixedsize=true, fontname=\"Consolas\"];\n"
+        out += " width=0.6, heigth=0.2, fixedsize=true, fontname=\"Consolas\"];\n"
 
         for LoopCar_id in range( len(self.loop_carried) ):
            (_,var) = self.loop_carried[LoopCar_id]
