@@ -65,6 +65,7 @@ class Program:
         self.inst_dependence_list = []  ## list of instruction data dependencies
         self.dependence_edges     = []  ## list of dependence offsets
         self.cyclic_paths         = []  # list of cyclic paths (a list of inst_ids)
+        self.inst_cyclic          = []  # list of inst_ids in cyclic paths (only once)
 
 
     # return JSON structure of current program
@@ -261,6 +262,14 @@ class Program:
         self.generate_dependence_info()
         self.get_cyclic_paths()
 
+        Insts = []
+        for cyc_path in self.cyclic_paths:
+          for iID in cyc_path:
+            Insts.append  (iID)
+
+        self.inst_cyclic = list(set(Insts))  
+        # list of inst_ids in cyclic paths (only once)
+
 
     def generate_dependence_info (self) -> None:
 
@@ -447,14 +456,15 @@ class Program:
             out +=  " margin=\"0.05,0\", fontname=\"courier\"];\n"
 
             for inst_id in range(self.n):
-                lat = latencies[inst_id]
-                txt = escape_html(self.instruction_list[inst_id].text)
-                out += f"  i{iter_id}s{inst_id} ["
-                out +=  "label=<<B>"
-                if show_latency:
-                  out += f"<FONT COLOR=\"red\">({lat})</FONT> "
-                out += f"{inst_id}: {txt}"
-                out +=  "</B>>];\n"
+                if show_internal or (inst_id in self.inst_cyclic):
+                  lat = latencies[inst_id]
+                  txt = escape_html(self.instruction_list[inst_id].text)
+                  out += f"  i{iter_id}s{inst_id} ["
+                  out +=  "label=<<B>"
+                  if show_latency:
+                    out += f"<FONT COLOR=\"red\">({lat})</FONT> "
+                  out += f"{inst_id}: {txt}"
+                  out +=  "</B>>];\n"
 
             out +=  "}\n"
 
@@ -463,12 +473,12 @@ class Program:
         out += " subgraph inVAR {\n"
         out += "  node[style=box, color=invis, fixedsize=false, fontname=\"courier\"];\n"
 
-        if show_const:
+        if show_const and show_internal:
           for const_id in range( len(self.constants) ):
              var = self.constants[const_id]
              out += f"  Const{const_id} [label=<<B>{var}</B>>, fontcolor=grey];\n"
 
-        if show_readonly:
+        if show_readonly and show_internal:
           for RdOnly_id in range( len(self.read_only) ):
              var = self.read_only[RdOnly_id]
              out += f"  RdOnly{RdOnly_id} [label=<<B>{var}</B>>, fontcolor=green];\n"
@@ -481,11 +491,11 @@ class Program:
 
         out += " { rank=min; "
                 
-        if show_const:
+        if show_const and show_internal:
           for const_id in range( len(self.constants) ):
              out += f"Const{const_id}; "
 
-        if show_readonly:
+        if show_readonly and show_internal:
           for RdOnly_id in range( len(self.read_only) ):
              out += f"RdOnly{RdOnly_id}; "
 
@@ -521,12 +531,12 @@ class Program:
               var  = dep[1]
 
               if i_id == -1:  # depends on Constant
-                if show_const:
+                if show_const and show_internal:
                   out += f"  Const{var} -> i{iter_id}s{inst_id}[color=grey];\n"
                 continue
 
               if i_id == -3:  # depends on Read-Only variable
-                if show_readonly:
+                if show_readonly and show_internal:
                   label  = self.variables[var]
                   RdOnly_id = self.read_only.index(label)
                   out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=green];\n"
@@ -570,9 +580,9 @@ class Program:
                       label  = self.variables[var]
 
               if is_recurrent or show_internal:
-                out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", {arrow}];\n"
-              else:
-                out += f"  {in_var} -> i{iter_id}s{inst_id} [color=invis];\n"
+                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", {arrow}];\n"
+              # else:
+              #    out += f"  {in_var} -> i{iter_id}s{inst_id} [color=invis];\n"
 
 
         # generate dependence links to loop-carried variables in final iteration
@@ -748,6 +758,7 @@ class Program:
 
         out += "\033[0m\n..................................................................................\n"
         print("Recurrent Paths: ", self.cyclic_paths)
+        print("Cyclic Insts:    ", self.inst_cyclic)
         print("Dependence List: ", self.inst_dependence_list)
 
         return out
