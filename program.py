@@ -464,7 +464,7 @@ class Program:
                   if show_latency:
                     out += f"<FONT COLOR=\"red\">({lat})</FONT> "
                   out += f"{inst_id}"
-                  if not show_internal and (num_iters <= min_iters):
+                  if not show_internal or (num_iters <= min_iters):
                     out += f": {txt}"
                   out +=  "</B>>];\n"
 
