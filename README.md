@@ -12,5 +12,4 @@ The tool is tailored to be used as a kernel of a web-based interactive applicati
 
 ## Authors
 Saúl Adserias Valero
-
 Juan Carlos Moure

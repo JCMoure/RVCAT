@@ -60,9 +60,6 @@ def export_json(data, name, proc=True):
     else:
         cfg = data
 
-    #  os.path.splitext(os.path.basename(self.name))[0]
-
-
     if proc:
         out_path: Path = PROCESSOR_PATH.joinpath(f"{name}.json")
     else:

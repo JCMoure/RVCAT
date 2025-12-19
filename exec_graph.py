@@ -1,6 +1,6 @@
 from math import inf
 
-def old_priority(isps: dict[int,list]) -> dict[tuple[int,int]]:
+def old_priority(isps):
       _ais    = [inf]               # assigned instructions
       _aps    = [-1]                # assigned ports
       nis     = len(isps)           # number of instructions
@@ -115,13 +115,13 @@ def print_path (path):
      print(path_str+"\n")
 
 
-def critical_path_statistics (program, path) -> str:
+def critical_path_statistics (program, path):
      N         = program.n
      total_lat = 0
      histogram = [0 for i in range(N)]
      decode_lat= 0
      retire_lat= 0
-
+        
      for node in path:
          stage = node[0] % 3
          iteration, idx = get_iteration_idx(program, node[0])
@@ -142,7 +142,7 @@ def critical_path_statistics (program, path) -> str:
      return out
 
 
-def critical_path_statistics_json (program, path) -> str:
+def critical_path_statistics_json (program, path):
     N         = program.n
     total_lat = 0
     histogram = [0 for i in range(N)]
@@ -164,7 +164,7 @@ def critical_path_statistics_json (program, path) -> str:
     for i in range(N):
         out['instructions'].append({'id': i,
                                     'instruction': program.instruction_list[i].text,
-                                    'percentage':  100*histogram[i]/total_lat})
+                                    'percentage': 100*histogram[i]/total_lat})
 
     out['dispatch'] = 100*decode_lat/total_lat
     out['retire']   = 100*retire_lat/total_lat
@@ -183,7 +183,6 @@ def print_graph ( program, ExecGraph ):
          out += f"   Execute = {get_list_of_edges(ExecGraph[i*3+1])}\n"
          out += f"   Retire  = {get_list_of_edges(ExecGraph[i*3+2])}\n"
      print(out)
-
 
 
 def exec_graph_update(ExecGraph, dynamic_idx, disp_latency, exec_latency, ret_latency):

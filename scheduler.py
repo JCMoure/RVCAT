@@ -1,9 +1,7 @@
 from .window      import Window, InstrState
 from .program     import Instruction, Program, _program
 from .processor   import Processor, _processor
-
 from . import exec_graph as ex
-
 import json
 
 global _scheduler
@@ -376,7 +374,6 @@ class Scheduler:
             self.window.pop(retires)
             self.dispatch()
 
-        critical_path = ex.longest_path(ExecGraph)
         critical_path = ex.longest_path(ExecGraph)
 
         cycles_per_iter = self.cycles / self.iterations
