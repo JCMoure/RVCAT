@@ -463,13 +463,15 @@ class Program:
         out += " subgraph inVAR {\n"
         out += "  node[style=box, color=invis, fixedsize=false, fontname=\"courier\"];\n"
 
-        for const_id in range( len(self.constants) ):
-           var = self.constants[const_id]
-           out += f"  Const{const_id} [label=<<B>{var}</B>>, fontcolor=grey];\n"
+        if show_const:
+          for const_id in range( len(self.constants) ):
+             var = self.constants[const_id]
+             out += f"  Const{const_id} [label=<<B>{var}</B>>, fontcolor=grey];\n"
 
-        for RdOnly_id in range( len(self.read_only) ):
-           var = self.read_only[RdOnly_id]
-           out += f"  RdOnly{RdOnly_id} [label=<<B>{var}</B>>, fontcolor=green];\n"
+        if show_readonly:
+          for RdOnly_id in range( len(self.read_only) ):
+             var = self.read_only[RdOnly_id]
+             out += f"  RdOnly{RdOnly_id} [label=<<B>{var}</B>>, fontcolor=green];\n"
 
         for LoopCar_id in range( len(self.loop_carried) ):
            (_,var) = self.loop_carried[LoopCar_id]
@@ -478,11 +480,14 @@ class Program:
         out += " }\n"
 
         out += " { rank=min; "
-        for const_id in range( len(self.constants) ):
-           out += f"Const{const_id}; "
+                
+        if show_const:
+          for const_id in range( len(self.constants) ):
+             out += f"Const{const_id}; "
 
-        for RdOnly_id in range( len(self.read_only) ):
-           out += f"RdOnly{RdOnly_id}; "
+        if show_readonly:
+          for RdOnly_id in range( len(self.read_only) ):
+             out += f"RdOnly{RdOnly_id}; "
 
         for LoopCar_id in range( len(self.loop_carried) ):
            out += f"LoopCar{LoopCar_id}; "
@@ -518,17 +523,13 @@ class Program:
               if i_id == -1:  # depends on Constant
                 if show_const:
                   out += f"  Const{var} -> i{iter_id}s{inst_id}[color=grey];\n"
-                else:
-                  out += f"  Const{var} -> i{iter_id}s{inst_id}[color=invis];\n"
                 continue
 
               if i_id == -3:  # depends on Read-Only variable
-                label  = self.variables[var]
-                RdOnly_id = self.read_only.index(label)
                 if show_readonly:
+                  label  = self.variables[var]
+                  RdOnly_id = self.read_only.index(label)
                   out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=green];\n"
-                else:
-                  out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=invis];\n"
                 continue
 
               # Check if current dependence is a part of a cyclical path
