@@ -416,8 +416,9 @@ class Program:
 
 
     def show_graphviz(self, num_iters= 0,
-                            show_const=False,    show_readonly=False, 
-                            show_internal=False, show_latency=False) -> str:
+                            show_internal=False, show_latency=False,
+                            show_small   =False, show_full=   False 
+                            ) -> str:
 
         def escape_html(text: str) -> str:
             """Escape HTML special characters for Graphviz HTML-like labels."""
@@ -464,7 +465,7 @@ class Program:
                   if show_latency:
                     out += f"<FONT COLOR=\"red\">({lat})</FONT> "
                   out += f"{inst_id}"
-                  if not show_internal or (num_iters <= min_iters):
+                  if not show_small:
                     out += f": {txt}"
                   out +=  "</B>>];\n"
 
@@ -475,12 +476,12 @@ class Program:
         out += " subgraph inVAR {\n"
         out += "  node[style=box, color=invis, fixedsize=false, fontname=\"courier\"];\n"
 
-        if show_const and show_internal:
+        if show_full and show_internal:
           for const_id in range( len(self.constants) ):
              var = self.constants[const_id]
              out += f"  Const{const_id} [label=<<B>{var}</B>>, fontcolor=grey];\n"
 
-        if show_readonly and show_internal:
+        if show_full and show_internal:
           for RdOnly_id in range( len(self.read_only) ):
              var = self.read_only[RdOnly_id]
              out += f"  RdOnly{RdOnly_id} [label=<<B>{var}</B>>, fontcolor=green];\n"
@@ -493,11 +494,11 @@ class Program:
 
         out += " { rank=min; "
                 
-        if show_const and show_internal:
+        if show_full and show_internal:
           for const_id in range( len(self.constants) ):
              out += f"Const{const_id}; "
 
-        if show_readonly and show_internal:
+        if show_full and show_internal:
           for RdOnly_id in range( len(self.read_only) ):
              out += f"RdOnly{RdOnly_id}; "
 
@@ -533,12 +534,12 @@ class Program:
               var  = dep[1]
 
               if i_id == -1:  # depends on Constant
-                if show_const and show_internal:
+                if show_full and show_internal:
                   out += f"  Const{var} -> i{iter_id}s{inst_id}[color=grey];\n"
                 continue
 
               if i_id == -3:  # depends on Read-Only variable
-                if show_readonly and show_internal:
+                if show_full and show_internal:
                   label  = self.variables[var]
                   RdOnly_id = self.read_only.index(label)
                   out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=green];\n"
