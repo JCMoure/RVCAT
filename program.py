@@ -358,6 +358,24 @@ class Program:
         return latencies
 
 
+    def get_critical_latencies (self, latencies):
+        max_latency    = 0   # maximum latency per iteration
+        min_iters      = 0   # minimum number of iterations for cyclic path
+        path_latencies = []  # (latency,iters) of cyclic paths
+
+        recurrent_paths = self.cyclic_paths
+        for path in recurrent_paths:
+            latency = sum( latencies[i] for i   in path[:-1] )
+            iters   = sum( a >= b       for a,b in zip(path[:-1], path[1:]) )
+            latency_iter = latency / iters
+            path_latencies.append((latency, iters))
+            if latency_iter > max_latency:
+                max_latency = latency_iter
+            min_iters = max( iters, min_iters )
+
+        return (max_latency, min_iters, path_latencies)
+
+
     def get_instr_ports (self) -> list:
 
         # return list of port_usage masks for ordered list of instructions
@@ -430,18 +448,10 @@ class Program:
         recurrent_paths = self.cyclic_paths
         latencies       = self.get_instr_latencies()
 
-        max_latency    = 0   # maximum latency per iteration
-        min_iters      = 0   # minimum number of iterations for cyclic path
-        path_latencies = []  # latencies of cyclic paths
-
-        for path in recurrent_paths:
-            latency = sum( latencies[i] for i   in path[:-1] )
-            iters   = sum( a >= b       for a,b in zip(path[:-1], path[1:]) )
-            latency_iter = latency / iters
-            path_latencies.append(latency_iter)
-            if latency_iter > max_latency:
-                max_latency = latency_iter
-            min_iters = max( iters, min_iters )
+        # max_latency    = maximum latency per iteration
+        # min_iters      = minimum number of iterations for cyclic path
+        # path_latencies = [ (latency,iters), (,) .. ]  of cyclic paths
+        max_latency, min_iters, path_latencies = self.get_critical_latencies(latencies) 
 
         max_iters = max (min_iters, num_iters)
 
@@ -487,8 +497,14 @@ class Program:
              out += f"  RdOnly{RdOnly_id} [label=<<B>{var}</B>>, fontcolor=green];\n"
 
         for LoopCar_id in range( len(self.loop_carried) ):
-           (_,var) = self.loop_carried[LoopCar_id]
-           out += f"  LoopCar{LoopCar_id} [label=<<B>{var}</B>>, fontcolor=red];\n"
+           (inst_id,var) = self.loop_carried[LoopCar_id]
+           cyclic = inst_id in self.inst_cyclic
+           if show_internal or cyclic:
+               out += f"  LoopCar{LoopCar_id} [label=<<B>{var}</B>>, "
+               if cyclic:
+                   out += "fontcolor=red];\n"
+               else:
+                   out += "fontcolor=blue];\n"
 
         out += " }\n"
 
@@ -503,7 +519,10 @@ class Program:
              out += f"RdOnly{RdOnly_id}; "
 
         for LoopCar_id in range( len(self.loop_carried) ):
-           out += f"LoopCar{LoopCar_id}; "
+           (inst_id,_) = self.loop_carried[LoopCar_id]
+           cyclic = inst_id in self.inst_cyclic
+           if show_internal or cyclic:
+             out += f"LoopCar{LoopCar_id}; "
 
         out += " }\n\n"
 
@@ -513,14 +532,31 @@ class Program:
         out += "  node [style=box, color=invis, fontcolor=red, fixedsize=false, fontname=\"courier\"];\n"
 
         for LoopCar_id in range( len(self.loop_carried) ):
-           (_,var) = self.loop_carried[LoopCar_id]
-           out += f"  OutCar{LoopCar_id} [label=<<B>{var} cycles/iter</B>>];\n"
+           (inst_id,var) = self.loop_carried[LoopCar_id]
+           cyclic = inst_id in self.inst_cyclic
+           if show_internal or cyclic:
+               out += f"  OutCar{LoopCar_id} "
+               if cyclic:
+                   out += f"[label=<<B>{var} : "
+                   path = 0
+                   while inst_id not in recurrent_paths[path]:
+                       path = path+1
+                   (lat,iters) = path_latencies[path]
+                   if iters==1:
+                     out += f"<FONT COLOR=\"blue\">{lat} cycles/iter</FONT></B>>];\n"
+                   else:
+                     out += f"<FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT></B>>];\n"
+               else:
+                   out += f"[label=<<B>{var}</B>>, fontcolor=blue];\n"
 
         out += " }\n"
 
         out += " { rank=max; "
         for LoopCar_id in range( len(self.loop_carried) ):
-           out += f"OutCar{LoopCar_id}; "
+           (inst_id,_) = self.loop_carried[LoopCar_id]
+           cyclic = inst_id in self.inst_cyclic
+           if show_internal or cyclic:
+               out += f"OutCar{LoopCar_id}; "
 
         out += " }\n\n"
 
@@ -533,33 +569,23 @@ class Program:
               i_id = dep[0]
               var  = dep[1]
 
-              if i_id == -1:  # depends on Constant
+              if i_id == -1:  # inst_id depends on Constant
                 if show_full and show_internal:
                   out += f"  Const{var} -> i{iter_id}s{inst_id}[color=grey];\n"
                 continue
 
-              if i_id == -3:  # depends on Read-Only variable
+              if i_id == -3:  # inst_id depends on Read-Only variable
                 if show_full and show_internal:
                   label  = self.variables[var]
                   RdOnly_id = self.read_only.index(label)
                   out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=green];\n"
                 continue
 
+              # inst_id depends on "normal" variable
               # Check if current dependence is a part of a cyclical path
-              is_recurrent = False
-              for path in recurrent_paths:
-                curr = path[0]
-                next = path[1]
-                if inst_id == next and i_id == curr :
-                  is_recurrent = True
-                  break
-                else:
-                  for i in range(len(path)-2):
-                    curr = next
-                    next = path[i+2]
-                    if next == inst_id and curr == i_id:
-                      is_recurrent = True
-                      break
+              in_cyclic   = inst_id in self.inst_cyclic
+              out_cyclic  = i_id    in self.inst_cyclic 
+              is_recurrent= in_cyclic and out_cyclic
 
               if is_recurrent:
                   arrow = "color=red, penwidth=2.0"
@@ -584,7 +610,7 @@ class Program:
                   else:
                       in_var = f"i{iter_id-1}s{i_id}"
                       if show_small:
-                        label = ""
+                          label = ""
                       else:
                           label  = self.variables[var]
 
@@ -594,19 +620,11 @@ class Program:
         # generate dependence links to loop-carried variables in final iteration
         for LoopCar_id in range( len(self.loop_carried) ):
            (prod_id,_) = self.loop_carried[LoopCar_id]
-
-           # Check if current dependence is a part of a cyclical path
-           is_recurrent = False
-           for path in recurrent_paths:
-             for i in range(len(path)-1):
-               if prod_id == path[i]:
-                 is_recurrent = True
-                 break
-
-           if is_recurrent:
+           cyclic      = prod_id in self.inst_cyclic
+           if cyclic:
                out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id}[color=red, penwidth=2.0];\n"
-           else:
-               out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id};\n"
+           elif show_internal:
+               out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id}[color=blue, penwidth=2.0];\n"
 
         return out + "}\n"
 
@@ -620,13 +638,10 @@ class Program:
         latencies       = self.get_instr_latencies()
         resources       = self.get_instr_ports()
 
-        max_latency = 0
-        for path in recurrent_paths:
-            latency = sum(latencies[i] for i in path[:-1])
-            iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
-            latency_iter = latency / iters
-            if latency_iter > max_latency:
-                max_latency = latency_iter
+        # max_latency    = maximum latency per iteration
+        # min_iters      = minimum number of iterations for cyclic path
+        # path_latencies = [ (latency,iters), (,) .. ]  of cyclic paths
+        max_latency, min_iters, path_latencies = self.get_critical_latencies(latencies) 
 
         dw = _processor.stages["dispatch"]
         rw = _processor.stages["retire"]
