@@ -514,7 +514,7 @@ class Program:
 
         for LoopCar_id in range( len(self.loop_carried) ):
            (_,var) = self.loop_carried[LoopCar_id]
-           out += f"  OutCar{LoopCar_id} [label=<<B>{var}</B>>];\n"
+           out += f"  OutCar{LoopCar_id} [label=<<B>{var} cycles/iter</B>>];\n"
 
         out += " }\n"
 
@@ -568,7 +568,10 @@ class Program:
 
               if inst_id > i_id: ## Not loop-carried
                   in_var = f"i{iter_id}s{i_id}"
-                  label  = self.variables[var]
+                  if show_small:
+                    label = ""
+                  else:
+                    label = self.variables[var]
               else:   ## Loop-carried
                   if iter_id == 1: # first loop iteration
                       var = self.variables[var]
@@ -580,7 +583,10 @@ class Program:
                       label  = ""
                   else:
                       in_var = f"i{iter_id-1}s{i_id}"
-                      label  = self.variables[var]
+                      if show_small:
+                        label = ""
+                      else:
+                          label  = self.variables[var]
 
               if is_recurrent or show_internal:
                   out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", {arrow}];\n"
