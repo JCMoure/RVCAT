@@ -710,31 +710,6 @@ class Program:
                 out += f"Ports: {port_str[:-1]}, Instr.: {inst_str[:-1]} --> {uses}"
                 out += f" instr. per iter. / {pw} instr. per cycle = {cycles:0.2f}\n"
 
-        out += f"\n*** Cyclic Dependence Paths:\n"
-        for path in recurrent_paths:
-            latency = sum(latencies[i] for i in path[:-1])
-            iters   = sum(a >= b for a,b in zip(path[:-1], path[1:]))
-            latency_iter = latency / iters
-
-            out += " "
-            for i in range( len(path)-1 ):
-              cur_ins  = path[i]
-              next_ins = path[i+1]
-              for dep in self.inst_dependence_list[next_ins]:
-                 if dep[0] == cur_ins:
-                    var  = dep[1]
-                    label= self.variables[var]
-
-              out += f"[{cur_ins}] -({label})-> "
-
-            out += f"[{path[-1]}] : "
-            out += f"("
-            if len(path)>2:
-                for i in path[:-2]:
-                  out += f"{latencies[i]}+"
-
-            out += f"{latencies[path[-2]]})cycles / {iters} iter. = {latency_iter:0.2f}\n"
-
         return out
 
 
