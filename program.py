@@ -455,14 +455,14 @@ class Program:
 
         max_iters = max (min_iters, num_iters)
 
-        out  = "digraph G {\n  rankdir=\"LR\"; splines=spline; newrank=true;\n"
+        out  = "digraph \"Data Dependence Graph\" {\n  rankdir=\"LR\"; splines=spline; newrank=true;\n"
         out += "  edge [fontname=\"courier\"; color=black; penwidth=1.5; fontcolor=blue];\n"
 
         # generate clusters of nodes: one cluster per loop iteration
         for iter_id in range(1, max_iters+1):
             out += f" subgraph cluster_{iter_id} "
             out +=  "{\n  style=\"filled,rounded\"; color=blue; "
-            out += f"fillcolor={colors[iter_id-1]};\n"
+            out += f"tooltip=\"Loop Iteration #{iter_id}\"; fillcolor={colors[iter_id-1]};\n"
             out +=  "  node [style=filled, shape=rect, fillcolor=lightgrey,"
             out +=  " margin=\"0.05,0\", fontname=\"courier\"];\n"
 
@@ -475,9 +475,10 @@ class Program:
                   if show_latency:
                     out += f"<FONT COLOR=\"red\">({lat})</FONT> "
                   out += f"{inst_id}"
-                  if not show_small:
-                    out += f": {txt}"
-                  out +=  "</B>>];\n"
+                  if show_small:
+                    out += f"</B>>, tooltip=\"{txt}\"];\n"
+                  else:
+                    out += f": {txt}</B>>,tooltip=\"instruction\"];\n"
 
             out +=  "}\n"
 
@@ -489,18 +490,18 @@ class Program:
         if show_full and show_internal:
           for const_id in range( len(self.constants) ):
              var = self.constants[const_id]
-             out += f"  Const{const_id} [label=<<B>{var}</B>>, fontcolor=grey];\n"
+             out += f"  Const{const_id} [label=<<B>{var}</B>>, tooltip=\"constant\", fontcolor=grey];\n"
 
         if show_full and show_internal:
           for RdOnly_id in range( len(self.read_only) ):
              var = self.read_only[RdOnly_id]
-             out += f"  RdOnly{RdOnly_id} [label=<<B>{var}</B>>, fontcolor=green];\n"
+             out += f"  RdOnly{RdOnly_id} [label=<<B>{var}</B>>, tooltip=\"read-only\", fontcolor=green];\n"
 
         for LoopCar_id in range( len(self.loop_carried) ):
            (inst_id,var) = self.loop_carried[LoopCar_id]
            cyclic = inst_id in self.inst_cyclic
            if show_internal or cyclic:
-               out += f"  LoopCar{LoopCar_id} [label=<<B>{var}</B>>, "
+               out += f"  LoopCar{LoopCar_id} [label=<<B>{var}</B>>, tooltip=\"loop-recurrent\", "
                if cyclic:
                    out += "fontcolor=red];\n"
                else:
@@ -543,11 +544,12 @@ class Program:
                        path = path+1
                    (lat,iters) = path_latencies[path]
                    if iters==1:
-                     out += f"<FONT COLOR=\"blue\">{lat} cycles/iter</FONT></B>>];\n"
+                     out += f"<FONT COLOR=\"blue\">{lat} cycles/iter</FONT></B>>"
                    else:
-                     out += f"<FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT></B>>];\n"
+                     out += f"<FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT></B>>"
+                   out += f", tooltip=\"cyclic path\"];\n"
                else:
-                   out += f"[label=<<B>{var}</B>>, fontcolor=blue];\n"
+                   out += f"[label=<<B>{var}</B>>, tooltip=\"not cyclic\", fontcolor=blue];\n"
 
         out += " }\n"
 
@@ -571,14 +573,14 @@ class Program:
 
               if i_id == -1:  # inst_id depends on Constant
                 if show_full and show_internal:
-                  out += f"  Const{var} -> i{iter_id}s{inst_id}[color=grey];\n"
+                  out += f"  Const{var} -> i{iter_id}s{inst_id}[color=grey,tooltip=\"depends on constant\"];\n"
                 continue
 
               if i_id == -3:  # inst_id depends on Read-Only variable
                 if show_full and show_internal:
                   label  = self.variables[var]
                   RdOnly_id = self.read_only.index(label)
-                  out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=green];\n"
+                  out += f"  RdOnly{RdOnly_id} -> i{iter_id}s{inst_id}[color=green,tooltip=\"depends on read-only variable\"];\n"
                 continue
 
               # inst_id depends on "normal" variable
@@ -614,17 +616,19 @@ class Program:
                       else:
                           label  = self.variables[var]
 
-              if is_recurrent or show_internal:
-                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", {arrow}];\n"
+              if is_recurrent:
+                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", tooltip=\"dependence on cyclical path\", {arrow}];\n"
+              elif show_internal:
+                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", tooltip=\"not on cyclical path\", {arrow}];\n"
 
         # generate dependence links to loop-carried variables in final iteration
         for LoopCar_id in range( len(self.loop_carried) ):
            (prod_id,_) = self.loop_carried[LoopCar_id]
            cyclic      = prod_id in self.inst_cyclic
            if cyclic:
-               out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id}[color=red, penwidth=2.0];\n"
+               out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id}[color=red, penwidth=2.0,tooltip=\"cyclic output dependence\"];\n"
            elif show_internal:
-               out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id}[color=blue, penwidth=2.0];\n"
+               out += f"  i{max_iters}s{prod_id} -> OutCar{LoopCar_id}[color=blue, penwidth=2.0, tooltip=\"non-cyclic output dependence\"];\n"
 
         return out + "}\n"
 
