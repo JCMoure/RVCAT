@@ -617,9 +617,13 @@ class Program:
                           label  = self.variables[var]
 
               if is_recurrent:
-                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", tooltip=\"dependence on cyclical path\", {arrow}];\n"
+                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\","
+                  out += f" labeltooltip=\"dependence variable: {label}\","
+                  out += f" tooltip=\"dependence on cyclical path\", {arrow}];\n"
               elif show_internal:
-                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\", tooltip=\"not on cyclical path\", {arrow}];\n"
+                  out += f"  {in_var} -> i{iter_id}s{inst_id} [label=\"{label}\","
+                  out += f" labeltooltip=\"dependence variable: {label}\","
+                  out += f" tooltip=\"not on cyclical path\", {arrow}];\n"
 
         # generate dependence links to loop-carried variables in final iteration
         for LoopCar_id in range( len(self.loop_carried) ):
