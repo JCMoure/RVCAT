@@ -2,10 +2,21 @@ from pathlib      import Path
 import importlib.resources, json, os
 
 PROCESSOR_PATH = importlib.resources.files("rvcat").joinpath("processors")
-PROGRAM_PATH   = importlib.resources.files("rvcat").joinpath("examples")
+PROGRAM_PATH   = importlib.resources.files("rvcat").joinpath("programs")
 
 
-# Load JSON file
+# return JSON structure containing names of processors/programs found in PROCESSOR/PROGRAM_PATH
+def list_json(proc=True) -> str:
+  
+    if proc:
+        l = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".json")]
+    else:
+        l = [f.split('.')[:-1] for f in os.listdir(PROGRAM_PATH)   if f.endswith(".json")]
+
+    return json.dumps(l)
+
+
+# Load processor/program JSON file
 def load_json(name, proc=True) -> json:
 
     if proc:
@@ -38,18 +49,7 @@ def load_json(name, proc=True) -> json:
            print(f"Unexpected error: {e}")
 
 
-# return JSON structure containing names of programs found in PROGRAM_PATH
-def list_json(proc=True) -> str:
-  
-    if proc:
-        l = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".json")]
-    else:
-        l = [f.split('.')[:-1] for f in os.listdir(PROGRAM_PATH)   if f.endswith(".json")]
-
-    return json.dumps(l)
-
-
-# write json to disk
+# write json processor/program to local file system
 def export_json(data, name, proc=True):
 
     if isinstance(data, str):  # if data is a string, convert to JSON structure
