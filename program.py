@@ -270,6 +270,9 @@ class Program:
         self.inst_cyclic = list(set(Insts))  
         # list of inst_ids in cyclic paths (only once)
 
+        return json.dumps(self.__dict__(), indent=2)
+
+
 
     def generate_dependence_info (self) -> None:
 
