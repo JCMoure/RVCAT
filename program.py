@@ -101,7 +101,7 @@ class Program:
 
 
     # Load JSON file containing program specification
-    def load(self, file="") -> None:
+    def load(self, file="") -> str:
 
         if file:
             json_name = f"{file}.json"
