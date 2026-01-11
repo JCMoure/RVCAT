@@ -46,6 +46,8 @@ class Processor:
         self.cache       = None
         if self.nBlocks > 0:
             self.cache   = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+        
+        return json.dumps(self.__dict__())
 
 
     def save(self, name="") -> None:

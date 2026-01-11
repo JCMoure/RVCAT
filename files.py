@@ -9,10 +9,9 @@ PROGRAM_PATH   = importlib.resources.files("rvcat").joinpath("programs")
 def list_json(proc=True) -> str:
   
     if proc:
-        l = [f.split('.')[:-1] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".json")]
+        l = [os.path.splitext(f)[0] for f in os.listdir(PROCESSOR_PATH) if f.endswith(".json")]
     else:
-        l = [f.split('.')[:-1] for f in os.listdir(PROGRAM_PATH)   if f.endswith(".json")]
-
+        l = [os.path.splitext(f)[0] for f in os.listdir(PROGRAM_PATH)   if f.endswith(".json")]
     return json.dumps(l)
 
 
