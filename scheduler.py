@@ -9,15 +9,14 @@ global _scheduler
 class Scheduler:
 
     def __init__(self) -> None:
-        self.iterations = 1
-        self.window_size= 16
-        self.window     = Window(16)
-        self.n          = 1*_program.n
+        self.iterations = 0
+        self.window_size= 1
+        self.window     = Window(1)
+        self.n          = 0
         self.dispatched = 0
         self.pc         = 0
         self.cycles     = 0
-        self.DepEdges   = _program.dependence_edges
-        return
+        self.DepEdges   = []
 
 
     def next_cycle(self) -> int:
@@ -256,6 +255,11 @@ class Scheduler:
         self.window     = Window(window_size)
         self.n          = niters*_program.n
 
+        self.cycles     = 0
+        self.dispatched = 0
+        self.pc         = 0
+        self.DepEdges   = _program.dependence_edges
+
         timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline()
         pad_iteration = len(str(niters-1))
         pad_i         = len(str(_program.n-1))
@@ -333,6 +337,9 @@ class Scheduler:
         self.window_size= window_size
         self.window     = Window(window_size)
         self.n          = niters*_program.n
+
+        self.pc         = 0
+        self.DepEdges   = _program.dependence_edges
 
         retired         = 0
         self.cycles     = 0
