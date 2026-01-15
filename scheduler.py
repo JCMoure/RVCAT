@@ -383,10 +383,10 @@ class Scheduler:
 
         out = {}
 
-        out["total_iterations"] = self.iterations
-        out["total_instructions"] = self.n
-        out["total_cycles"] = self.cycles
-        out["ipc"] = IPC
+        out["total_iterations"]     = self.iterations
+        out["total_instructions"]   = self.n
+        out["total_cycles"]         = self.cycles
+        out["ipc"]                  = IPC
         out["cycles_per_iteration"] = cycles_per_iter
 
         out["ports"] = {}
@@ -396,12 +396,15 @@ class Scheduler:
 
         if _processor.cache != None:
             MM_usage, MM_Rd_usage, RdMisses, WrMisses = _processor.cache.statistics(self.cycles)
-            out["MM_usage"] = MM_usage
-            out["MM_read_usage"] = MM_Rd_usage
-            out["read_misses"] = RdMisses
-            out["write_misses"] = WrMisses
+        else:
+            MM_usage, MM_Rd_usage, RdMisses, WrMisses = 0, 0, 0, 0
 
-        out["critical_path"] = ex.critical_path_statistics_json(_program, critical_path)
+        out["MM_usage"]       = MM_usage
+        out["MM_read_usage"]  = MM_Rd_usage
+        out["read_misses"]    = RdMisses
+        out["write_misses"]   = WrMisses
+
+        out["critical_path"]   = ex.critical_path_statistics_json(_program, critical_path)
         return json.dumps(out)
 
 
