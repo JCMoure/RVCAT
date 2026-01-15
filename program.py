@@ -709,7 +709,7 @@ class Program:
                 text+= f"{uses} instr. per iter. / {pw} instr. per cycle = {cycles:0.2f}"
                 analysis["Throughput-Bottlenecks"].append(text)
 
-        return analysis
+        return json.dumps(analysis, indent=2)
 
 
     def show_dependencies(self) -> str:
