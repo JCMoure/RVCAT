@@ -1,5 +1,4 @@
 from .processor import Processor, _processor
-from . import files
 import json
 
 global _program
@@ -94,21 +93,8 @@ class Program:
         return self.instruction_list[i%self.n]
 
 
-    def save(self, name="") -> None:
-        if name == "":
-            name = self.name
-        files.export_json( self.json(), name, False)
-
-
-    # Load JSON file containing program specification
-    def load(self, file="") -> str:
-
-        if file:
-            json_name = f"{file}.json"
-        else:
-            json_name = "baseline.json"
-
-        cfg = files.load_json ( json_name, False ) ## be sure is JSON struct
+    # Load JSON object containing program specification
+    def load(self, cfg) -> str:
 
         if isinstance(cfg, str):  # if it is a string convert to JSON struct
             raise ValueError(f"Invalid JSON")
@@ -269,9 +255,6 @@ class Program:
 
         self.inst_cyclic = list(set(Insts))  
         # list of inst_ids in cyclic paths (only once)
-
-        return json.dumps(self.__dict__(), indent=2)
-
 
 
     def generate_dependence_info (self) -> None:
@@ -640,7 +623,9 @@ class Program:
         return out + "}\n"
 
 
-    def show_performance_analysis(self) -> str:
+    def get_performance_analysis(self) -> dict:
+
+        analysis = { "name": self.name }
 
         ports    = list( _processor.ports.keys() )
         n_ports  = len ( ports )
@@ -678,26 +663,28 @@ class Program:
 
         max_cycles = max(port_cycles, dw_cycles, rw_cycles)
 
+        analysis["LatencyTime"]=    max_latency 
+        analysis["ThroughputTime"]= max_cycles
+
         cycles_limit = max_cycles
         if (max_latency > max_cycles):
-            perf_bound= "LATENCY-BOUND"
+            analysis["performance-bound"] = "LATENCY"
             cycles_limit = max_latency
         elif (max_latency < max_cycles):
-            perf_bound= "THROUGHPUT-BOUND"
+            analysis["performance-bound"] = "THROUGHPUT"
         else:
-            perf_bound= "LATENCY- and THROUGHPUT-BOUND"
-        out  = f"Performance is {perf_bound} and minimum execution time is {cycles_limit:0.2f} cycles per loop iteration\n"
-        out += f" Throughput-limit is {max_cycles:0.2f} cycles/iteration\n"
-        out += f"  Latency-limit   is {max_latency:0.2f} cycles/iteration\n"
+            analysis["performance-bound"] = "LATENCY+THROUGHPUT"
+        
+        analysis["BestTime"] = cycles_limit
+        analysis["Throughput-Bottlenecks"] = []
 
-        out += f"\n*** Throughput ********\n"
         if dw_cycles == max_cycles:
-           out += f"dispatch stage: {self.n} instr. per iter. / {dw} instr. per cycle"
-           out += f" = {dw_cycles:0.2f}\n"
+           text = f"Dispatch: {self.n} instr. per iter. / {dw} instr. per cycle = {dw_cycles:0.2f}"
+           analysis["Throughput-Bottlenecks"].append(text)
 
         if rw_cycles == max_cycles:
-           out += f" retire  stage: {self.n} instr. per iter. / {rw} instr. per cycle"
-           out += f" = {rw_cycles:0.2f}\n"
+           text = f"Retire: {self.n} instr. per iter. / {rw} instr. per cycle = {rw_cycles:0.2f}"
+           analysis["Throughput-Bottlenecks"].append(text)
 
         for mask in range(1,n_combinations):
             uses = 0
@@ -718,10 +705,11 @@ class Program:
                         port_str += f"P{ports[j]}+"
                     mask_bit *= 2
 
-                out += f"Ports: {port_str[:-1]}, Instr.: {inst_str[:-1]} --> {uses}"
-                out += f" instr. per iter. / {pw} instr. per cycle = {cycles:0.2f}\n"
+                text = f"Ports: {port_str[:-1]}, Instr.: {inst_str[:-1]} -->"
+                text+= f"{uses} instr. per iter. / {pw} instr. per cycle = {cycles:0.2f}"
+                analysis["Throughput-Bottlenecks"].append(text)
 
-        return out
+        return analysis
 
 
     def show_dependencies(self) -> str:

@@ -253,13 +253,12 @@ class Scheduler:
         return timeline, port_timeline, MM_timeline, INSTR_Info, critical_path
 
 
-    def format_timeline(self, niters: int = 3):
-
-        global_n     = self.n
-        global_iters = self.iterations
+    def get_timeline(self, niters: int = 3, window_size: int=100) -> str:
 
         self.iterations = niters
-        self.n          = niters * _program.n
+        self.window_size= window_size
+        self.window     = Window(window_size)
+        self.n          = niters*_program.n
 
         timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline()
         pad_iteration = len(str(niters-1))
@@ -329,13 +328,16 @@ class Scheduler:
             usage = " ".join(["X" if used else " " for used in cycles])
             out_Ports += f"P.{port:{pad_iteration+pad_i+2}} {usage}\n"
 
-        self.n          = global_n
-        self.iterations = global_iters
-
         return out_cycles + out_Ports + out_MM + "\n" + out_cycles + out_timeline
 
 
-    def format_analysis_json(self) -> str:
+    def get_results(self, niters: int = 3, window_size: int=100) -> str:
+    
+        self.iterations = niters
+        self.window_size= window_size
+        self.window     = Window(window_size)
+        self.n          = niters*_program.n
+
         retired         = 0
         self.cycles     = 0
         self.dispatched = 0

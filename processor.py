@@ -1,5 +1,4 @@
 from .cache import Cache
-from . import files
 import json
  
 global _processor
@@ -20,15 +19,8 @@ class Processor:
         self.sched     = "greedy"
 
 
-    # Load JSON file containing processor specification
-    def load(self, file="") -> None:
-
-        if file:
-            json_name = f"{file}.json"
-        else:
-            json_name = "baseline.json"
-
-        cfg = files.load_json ( json_name, True ) ## be sure is JSON struct
+    # Load JSON objet containing processor specification
+    def load(self, cfg) -> None:
 
         if isinstance(cfg, str):  # if it is a string convert to JSON struct
             raise ValueError(f"Invalid JSON")
@@ -46,19 +38,6 @@ class Processor:
         self.cache       = None
         if self.nBlocks > 0:
             self.cache   = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
-        
-        return json.dumps(self.__dict__())
-
-
-    def save(self, name="") -> None:
-        if name == "":
-            name = self.name
-        files.export_json( self.json(), name, True)
-
-
-    def reset(self) -> None:
-        if self.nBlocks > 0:
-            self.cache.reset()
 
 
     def cache_access(self, mType, Addr, cycles):
@@ -90,10 +69,6 @@ class Processor:
             return instr_latency, instr_ports
 
         return 1,next(iter(self.ports))
-
-
-    def json(self) -> str:
-        return json.dumps(self.__dict__())
 
 
     def __repr__(self) -> str:
