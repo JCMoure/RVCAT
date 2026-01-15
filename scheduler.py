@@ -9,19 +9,15 @@ global _scheduler
 class Scheduler:
 
     def __init__(self) -> None:
-        return
-
-
-    def init (self, iterations: int=3, window_size: int=100) -> None:
-
-        self.iterations = iterations
-        self.window_size= window_size
-        self.window     = Window(window_size)
-        self.n          = iterations*_program.n
+        self.iterations = 1
+        self.window_size= 16
+        self.window     = Window(16)
+        self.n          = 1*_program.n
         self.dispatched = 0
         self.pc         = 0
         self.cycles     = 0
         self.DepEdges   = _program.dependence_edges
+        return
 
 
     def next_cycle(self) -> int:
