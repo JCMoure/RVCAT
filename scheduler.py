@@ -21,7 +21,7 @@ class Scheduler:
 
     def next_cycle(self) -> int:
 
-        xw    = _processor.ports.length
+        xw    = len(_processor.ports)
         rw    = _processor.retire
         sched = _processor.sched != "greedy"
 
