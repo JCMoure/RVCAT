@@ -639,8 +639,8 @@ class Program:
         # path_latencies = [ (latency,iters), (,) .. ]  of cyclic paths
         max_latency, min_iters, path_latencies = self.get_critical_latencies(latencies) 
 
-        dw = _processor.stages["dispatch"]
-        rw = _processor.stages["retire"]
+        dw = _processor.dispatch
+        rw = _processor.retire
 
         dw_cycles = self.n / dw
         rw_cycles = self.n / rw

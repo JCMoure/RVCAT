@@ -7,8 +7,9 @@ class Processor:
 
     def __init__(self) -> None:
         self.name      = ""
-        self.stages    = {}
-        self.resources = {}
+        self.dispatch  = 1
+        self.retire    = 1
+        self.latencies = {}
         self.ports     = {}
         self.rports    = {}
         self.cache     = None
@@ -26,10 +27,10 @@ class Processor:
             raise ValueError(f"Invalid JSON")
 
         self.name        = cfg.get("name", "")
-        self.stages      = cfg.get("stages", {})
-        self.resources   = cfg.get("resources", {})
+        self.dispatch    = cfg.get("dispatch", 1)
+        self.retire      = cfg.get("retire", 1)
+        self.latencies   = cfg.get("latencies", {})
         self.ports       = cfg.get("ports", {})
-        self.rports      = cfg.get("rports", {})
         self.nBlocks     = cfg.get("nBlocks", 0)
         self.blkSize     = cfg.get("blkSize", 0)
         self.mPenalty    = cfg.get("mPenalty", 0)
@@ -38,6 +39,15 @@ class Processor:
         self.cache       = None
         if self.nBlocks > 0:
             self.cache   = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+
+        self.rports = {}
+        for port, instr_types in self.ports.items():
+            for instr_type in instr_types:
+                self.rports[instr_type]= []
+
+        for port, instr_types in self.ports.items():
+            for instr_type in instr_types:
+                self.rports[instr_type].append(port)
 
 
     def cache_access(self, mType, Addr, cycles):
@@ -50,7 +60,7 @@ class Processor:
         instr_latency = None
         res_type = instr_type.upper()
         for i in range(n+1):
-            if res_latency := self.resources.get(res_type):
+            if res_latency := self.latencies.get(res_type):
                 instr_latency = res_latency
                 break
             elif i != n:
@@ -79,14 +89,14 @@ class Processor:
         return {
             "name"      : self.name,
             "sched"     : self.sched,
-            "stages"    : self.stages,
-            "resources" : self.resources,
-            "ports"     : self.ports,
-            "rports"    : self.rports,
+            "dispatch"  : self.dispatch,
+            "retire"    : self.retire,
             "nBlocks"   : self.nBlocks,
             "blkSize"   : self.blkSize,
             "mPenalty"  : self.mPenalty,
-            "mIssueTime": self.mIssueTime
+            "mIssueTime": self.mIssueTime,
+            "latencies" : self.resources,
+            "ports"     : self.ports
         }
 
 _processor = Processor()

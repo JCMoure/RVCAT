@@ -21,8 +21,8 @@ class Scheduler:
 
     def next_cycle(self) -> int:
 
-        xw    = _processor.stages["execute"]
-        rw    = _processor.stages["retire"]
+        xw    = _processor.ports.length
+        rw    = _processor.retire
         sched = _processor.sched != "greedy"
 
         issue_queue = {}
@@ -119,12 +119,12 @@ class Scheduler:
                   instr.substate  = InstrState.WAIT_BANDWIDTH
                   instr.exec_lat += 1
 
-        retires = _processor.stages["retire"] - rw
+        retires = _processor.retire - rw
         return retires, used_ports, MM_access
 
 
     def dispatch(self):
-        dw = _processor.stages["dispatch"]
+        dw = _processor.dispatch
         while self.dispatched < self.n and dw and not self.window.is_full():
             static_idx = self.pc % _program.n
             self.window.push(self.cycles, self.pc, static_idx, "", 0)
@@ -188,7 +188,7 @@ class Scheduler:
 
 
     def generate_timeline(self):
-        rw              = _processor.stages["retire"]
+        rw              = _processor.retire
         retired         = 0
         self.dispatched = 0
         self.cycles     = 0
