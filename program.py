@@ -100,7 +100,6 @@ class Program:
             raise ValueError(f"Invalid JSON")
 
         self.name   = cfg.get("name", "")
-        self.n      = cfg.get("n", 0)
         self.loaded = True
 
         instrs = []
@@ -110,9 +109,7 @@ class Program:
             instrs.append(instr)
 
         self.instruction_list = instrs
-
-        if self.n != len(instrs):
-            raise ValueError(f"JSON corrupted n={self.n} is not number of instructions={len(instrs)}")
+        self.n                = len(instrs)
          
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)

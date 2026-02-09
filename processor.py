@@ -17,7 +17,7 @@ class Processor:
         self.blkSize   = 0
         self.mPenalty  = 0
         self.mIssueTime= 0
-        self.sched     = "greedy"
+        self.sched     = "advanced"
 
 
     # Load JSON objet containing processor specification
@@ -35,7 +35,7 @@ class Processor:
         self.blkSize     = cfg.get("blkSize", 0)
         self.mPenalty    = cfg.get("mPenalty", 0)
         self.mIssueTime  = cfg.get("mIssueTime", 0)
-        self.sched       = cfg.get("sched", "")
+        self.sched       = cfg.get("sched", "advanced")
         self.cache       = None
         if self.nBlocks > 0:
             self.cache   = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)

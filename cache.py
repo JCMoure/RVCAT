@@ -88,6 +88,7 @@ class Cache:
       else:
         self.CacheWrMisses += 1
 
+
       pos = self.getLRU()
 
       # compute traffic to Main Memory
