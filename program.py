@@ -1,48 +1,6 @@
-from .processor import Processor, _processor
 import json
 
 global _program
-
-class Instruction:
-
-    def __init__(self) -> None:
-        self.type     = ""
-        self.text     = ""
-        self.destin   = ""
-        self.source1  = ""
-        self.source2  = ""
-        self.source3  = ""
-        self.constant = ""
-
-
-    def from_json(data: dict):
-
-        instr = Instruction()
-        instr.type     = data.get("type", "")
-        instr.text     = data.get("text", "")
-        instr.destin   = data.get("destin", "")
-        instr.source1  = data.get("source1", "")
-        instr.source2  = data.get("source2", "")
-        instr.source3  = data.get("source3", "")
-        instr.constant = data.get("constant", "")
-        return instr
-
-
-    def json(self) -> dict:
-        return {
-            "type":     self.type,
-            "text":     self.text,
-            "destin":   self.destin,
-            "source1":  self.source1,
-            "source2":  self.source2,
-            "source3":  self.source3,
-            "constant": self.constant
-        }
-
-
-    def __repr__(self) -> str:
-        return f"{self.text: <16}"
-
 
 class Program:
 
@@ -66,23 +24,6 @@ class Program:
         self.cyclic_paths         = []  # list of cyclic paths (a list of inst_ids)
         self.inst_cyclic          = []  # list of inst_ids in cyclic paths (only once)
 
-
-    # return JSON structure of current program
-    def json(self) -> str:
-        return json.dumps(self.__dict__(), indent=2)
-
-
-    # return JSON values of current program-class instance
-    def __dict__(self) -> dict:
-        data = {
-            "name": self.name,
-            "n":    self.n,
-        }
-        data["instruction_list"]=[]
-        for instruction in self.instruction_list:
-            data["instruction_list"].append(instruction.json())
-
-        return data
 
 
     def __repr__(self) -> str:
@@ -708,51 +649,5 @@ class Program:
 
         return json.dumps(analysis, indent=2)
 
-
-    def show_dependencies(self) -> str:
-
-        out = "............... Instruction Data-Dependences ......................"
- 
-        for inst_id in range(self.n):
-            instruction = self.instruction_list[inst_id]
-            out += f"\n{inst_id:{len(str(self.n))}}: {instruction.text:20}: "
-
-            for dep in self.inst_dependence_list[inst_id]:
-                dep_id = dep[0]
-                if dep_id == -1:  ## constant input
-                  dep_var = self.constants[ dep[1] ]
-                  out += f"\033[96m.. --> {dep_var:5};\033[0m "
-
-                elif dep_id == -3:  ## read-only input variable
-                  dep_var = self.variables[ dep[1] ]
-                  out += f"\033[94m.. --> {dep_var:5};\033[0m "
-
-                else:
-                  dep_var = self.variables[dep[1]]
-                  if dep_id >= inst_id:
-                    out += f"\033[91m"
-                  out += f"{dep_id:2} --> {dep_var:5}; "
-                  if dep_id >= inst_id:
-                    out += f"\033[0m"
-
-        out += "\n\n Variables        : "
-        for var in self.variables:
-            out += f"{var},"
-        out += "\n Constants        :\033[96m "
-        for var in self.constants:
-            out += f"{var},"
-        out += "\n\033[0m Read-Only vars   :\033[94m "
-        for var in self.read_only:
-            out += f"{var},"
-        out += "\n\033[0m Loop-Carried vars:\033[91m "
-        for (prod_id, var) in self.loop_carried:
-            out += f"{prod_id} --> {var},"
-
-        out += "\033[0m\n..................................................................................\n"
-        print("Recurrent Paths: ", self.cyclic_paths)
-        print("Cyclic Insts:    ", self.inst_cyclic)
-        print("Dependence List: ", self.inst_dependence_list)
-
-        return out
 
 _program = Program()
