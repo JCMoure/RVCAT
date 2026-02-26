@@ -380,7 +380,37 @@ class Program:
         return resources
 
 
-     def show_memory_trace(self) -> str:
+    def show_code(self) -> str:
+
+        instr_pad, type_pad = 0, 0
+        for i in range(self.n):
+            instr_pad = max( instr_pad, len(self.instruction_list[i].text))
+            type_pad  = max( type_pad,  len(self.instruction_list[i].type))
+
+        InsMessage = "INSTRUCTIONS"
+        TypeMessage= "TYPE"
+        out = f"   {InsMessage:{instr_pad}}   {TypeMessage:{type_pad}} LATENCY EXECUTION PORTS\n"
+        for i in range(self.n):
+            instruction = self.instruction_list[i]
+            instr_type  = instruction.type
+            resource    = _processor.get_resource(instr_type)
+            if not resource:
+                latency = 1
+                ports = ()
+            else:
+                latency, ports = resource
+            out += f"{i:{len(str(self.n))}}: {instruction.text:{instr_pad}} : "
+            out += f"{instr_type:{type_pad}} : {latency:^3} : "
+
+            n = len(ports)
+            for j in range(n-1):
+              out += f"P{ports[j]},"
+
+            out += f"P{ports[n-1]}\n"
+        return out
+
+
+    def show_memory_trace(self) -> str:
         out = "............................. Memory Trace Description ..........................."
         out += "\n...............................................................................\n\n"
         return out
