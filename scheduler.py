@@ -1,6 +1,5 @@
 from .window      import Window, InstrState
-from .program     import Instruction, Program, _program
-from .processor   import Processor, _processor
+from .program     import Program, _program
 from . import exec_graph as ex
 import json
 
