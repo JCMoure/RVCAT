@@ -12,11 +12,9 @@ class Program:
         self.instruction_list = []
 
         # data generated when loading a new program. Do not need to save it
-        self.loaded       = False
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)
         self.read_only    = [] # list of read-only variable names (only once)
-
         self.loop_carried = [] # list of tuples of loop-carried variables: (producer_id,var_name)
 
         self.inst_dependence_list = []  ## list of instruction data dependencies
@@ -24,34 +22,15 @@ class Program:
         self.cyclic_paths         = []  # list of cyclic paths (a list of inst_ids)
         self.inst_cyclic          = []  # list of inst_ids in cyclic paths (only once)
 
-
-
-    def __repr__(self) -> str:
-        return json.dumps(self.__dict__(), indent=2)
-
-
-    def __getitem__(self, i: int) -> Instruction:
+    def __getitem__(self, i: int):
         return self.instruction_list[i%self.n]
 
 
     # Load JSON object containing program specification
-    def load(self, cfg) -> str:
-
-        if isinstance(cfg, str):  # if it is a string convert to JSON struct
-            raise ValueError(f"Invalid JSON")
-
-        self.name   = cfg.get("name", "")
-        self.loaded = True
-
-        instrs = []
-        for entry in cfg.get("instruction_list", []):
-            instr_dict = json.loads(entry) if isinstance(entry, str) else entry
-            instr      = Instruction.from_json(instr_dict)
-            instrs.append(instr)
+    def load_instruction_list(self, instrs) -> None:
 
         self.instruction_list = instrs
-        self.n                = len(instrs)
-         
+        self.n                = len(instrs)        
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)
         self.loop_carried = [] # index to list of variable names which are loop-carried
@@ -194,7 +173,6 @@ class Program:
         self.inst_cyclic = list(set(Insts))  
         # list of inst_ids in cyclic paths (only once)
 
-
     def generate_dependence_info (self) -> None:
 
         # Used by execution scheduler to control data dependencies during execution
@@ -215,7 +193,6 @@ class Program:
                   offsets.append(offset)
 
             self.dependence_edges.append(offsets)
-
 
     def get_cyclic_paths(self) -> None:
 
@@ -264,32 +241,14 @@ class Program:
             path = path[min_index:]+path[:min_index+1]
             self.cyclic_paths.append(path)
 
-
-    def get_instr_latencies(self) -> list:
-
-        # return list of latencies for ordered list of instructions
-
-        latencies = []
-
-        for i in range(self.n):
-            resource = _processor.get_resource(self.instruction_list[i].type)
-            if not resource:
-                latency = 1
-            else:
-                latency = resource[0]
-            latencies.append(latency)
-
-        return latencies
-
-
-    def get_critical_latencies (self, latencies):
+    def get_critical_latencies (self):
         max_latency    = 0   # maximum latency per iteration
         min_iters      = 0   # minimum number of iterations for cyclic path
         path_latencies = []  # (latency,iters) of cyclic paths
 
         recurrent_paths = self.cyclic_paths
         for path in recurrent_paths:
-            latency = sum( latencies[i] for i   in path[:-1] )
+            latency = sum( self.instruction_list[i].latency for i in path[:-1] )
             iters   = sum( a >= b       for a,b in zip(path[:-1], path[1:]) )
             latency_iter = latency / iters
             path_latencies.append((latency, iters))
@@ -299,69 +258,20 @@ class Program:
 
         return (max_latency, min_iters, path_latencies)
 
-
-    def get_instr_ports (self) -> list:
-
-        # return list of port_usage masks for ordered list of instructions
-
-        ports        = list( _processor.ports.keys() )
-        n_ports      = len ( ports )
-        resources    = []
-
-        for i in range(self.n):
-            resource   = _processor.get_resource(self.instruction_list[i].type)
-            instr_mask = 0
-            mask_bit   = 1
-            for j in range(n_ports):
-                if ports[j] in resource[1]:
-                    instr_mask += mask_bit
-                mask_bit *= 2
-            resources.append(instr_mask)
-
-        return resources
-
-
-    def show_code(self) -> str:
-
-        instr_pad, type_pad = 0, 0
-        for i in range(self.n):
-            instr_pad = max( instr_pad, len(self.instruction_list[i].text))
-            type_pad  = max( type_pad,  len(self.instruction_list[i].type))
-
-        InsMessage = "INSTRUCTIONS"
-        TypeMessage= "TYPE"
-        out = f"   {InsMessage:{instr_pad}}   {TypeMessage:{type_pad}} LATENCY EXECUTION PORTS\n"
-        for i in range(self.n):
-            instruction = self.instruction_list[i]
-            instr_type  = instruction.type
-            resource    = _processor.get_resource(instr_type)
-            if not resource:
-                latency = 1
-                ports = ()
-            else:
-                latency, ports = resource
-            out += f"{i:{len(str(self.n))}}: {instruction.text:{instr_pad}} : "
-            out += f"{instr_type:{type_pad}} : {latency:^3} : "
-
-            n = len(ports)
-            for j in range(n-1):
-              out += f"P{ports[j]},"
-
-            out += f"P{ports[n-1]}\n"
-        return out
-
-
     def show_memory_trace(self) -> str:
         out = "............................. Memory Trace Description ..........................."
         out += "\n...............................................................................\n\n"
         return out
 
-
-    def show_graphviz(self, num_iters= 0,
-                            show_internal=False, show_latency=False,
-                            show_small   =False, show_full=   False 
-                            ) -> str:
-
+    def show_graphviz(  self, 
+                        instrs       = None,
+                        num_iters    = 0,
+                        show_internal= False,
+                        show_latency = False,
+                        show_small   = False,
+                        show_full    = False 
+                        ) -> str:
+      
         def escape_html(text: str) -> str:
             """Escape HTML special characters for Graphviz HTML-like labels."""
             return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
@@ -369,13 +279,14 @@ class Program:
         colors = ["lightblue", "greenyellow", "lightyellow", 
                   "lightpink", "lightgrey",   "lightcyan", "lightcoral"]
 
+        self.load_instruction_list(self, instrs)
+
         recurrent_paths = self.cyclic_paths
-        latencies       = self.get_instr_latencies()
 
         # max_latency    = maximum latency per iteration
         # min_iters      = minimum number of iterations for cyclic path
         # path_latencies = [ (latency,iters), (,) .. ]  of cyclic paths
-        max_latency, min_iters, path_latencies = self.get_critical_latencies(latencies) 
+        max_latency, min_iters, path_latencies = self.get_critical_latencies() 
 
         max_iters = max (min_iters, num_iters)
 
@@ -392,7 +303,7 @@ class Program:
 
             for inst_id in range(self.n):
                 if show_internal or (inst_id in self.inst_cyclic):
-                  lat = latencies[inst_id]
+                  lat = self.instruction_list[inst_id].latency
                   txt = escape_html(self.instruction_list[inst_id].text)
                   out += f"  i{iter_id}s{inst_id} ["
                   out +=  "label=<<B>"
@@ -560,44 +471,54 @@ class Program:
 
         return out + "}\n"
 
-
-    def get_performance_analysis(self) -> dict:
+    def get_performance_analysis(self, process) -> dict:
 
         analysis = { "name": self.name }
 
-        ports    = list( _processor.ports.keys() )
-        n_ports  = len ( ports )
+        self.load_instruction_list(self, process.instruction_list)
 
-        recurrent_paths = self.cyclic_paths
-        latencies       = self.get_instr_latencies()
-        resources       = self.get_instr_ports()
+        # ports    = list( process.ports.keys() )
+        # n_ports  = len ( ports )
 
         # max_latency    = maximum latency per iteration
         # min_iters      = minimum number of iterations for cyclic path
         # path_latencies = [ (latency,iters), (,) .. ]  of cyclic paths
-        max_latency, min_iters, path_latencies = self.get_critical_latencies(latencies) 
+        max_latency, min_iters, path_latencies = self.get_critical_latencies() 
 
-        dw = _processor.dispatch
-        rw = _processor.retire
+        dw = process.dispatch
+        rw = process.retire
 
         dw_cycles = self.n / dw
         rw_cycles = self.n / rw
 
-        # generate all combinations of ports
-        n_combinations = 1
-        for i in range(n_ports):
-            n_combinations *= 2
+        # Mask of used ports
+        all_ports = 0
+        for instr in self.instruction_list:
+            all_ports |= instr.ports
+
+        # list of used ports and number of used ports
+        used_ports = [i for i in range(32) if (all_ports >> i) & 1]
+        n_ports = len(used_ports)
+
+        # All combinations of this ports
+        from itertools import combinations
 
         port_cycles = 0
-        for mask in range(1,n_combinations):
-            uses = 0
-            pw   = bin(mask).count("1")
-            for instr_mask in resources:
-                if (mask & instr_mask) == instr_mask:
-                     uses += 1
-            cycles = uses / pw
-            if port_cycles < cycles:
-                port_cycles = cycles
+        for r in range(1, n_ports + 1):
+            for subset in combinations(used_ports, r):
+                mask = 0
+                for p in subset:
+                    mask |= (1 << p)
+
+                uses = 0
+                for instr in self.instruction_list:
+                    instr_mask = instr.ports
+                    if (mask & instr_mask) == instr_mask:
+                        uses += 1
+
+                cycles = uses / len(subset)
+                if cycles > port_cycles:
+                    port_cycles = cycles
 
         max_cycles = max(port_cycles, dw_cycles, rw_cycles)
 
@@ -624,28 +545,33 @@ class Program:
            text = f"Retire: {self.n} instr. per iter. / {rw} instr. per cycle = {rw_cycles:0.2f}"
            analysis["Throughput-Bottlenecks"].append(text)
 
-        for mask in range(1,n_combinations):
-            uses = 0
-            inst_str= ""
-            for i in range( len(resources) ):
-                instr_mask = resources[i]
-                if (mask & instr_mask) == instr_mask:  ## instruction only uses ports in mask
-                     uses += 1
-                     inst_str += f"{i},"
+        for r in range(1, n_ports + 1):
+            for subset in combinations(used_ports, r):
+                mask = 0
+                for p in subset:
+                    mask |= (1 << p)
 
-            pw   = bin(mask).count("1")
-            cycles = uses / pw
-            if cycles == max_cycles:
-                port_str = ""
-                mask_bit=1
-                for j in range(n_ports):
-                    if mask_bit & mask == mask_bit:
-                        port_str += f"P{ports[j]}+"
-                    mask_bit *= 2
+                uses = 0
+                inst_str= ""
+                for i in range(self.n):
+                    instr = self.instruction_list[i]
+                    instr_mask = instr.ports
+                    if (mask & instr_mask) == instr_mask:
+                        uses += 1
+                        inst_str += f"{i},"
 
-                text = f"Ports: {port_str[:-1]}, Instr.: {inst_str[:-1]} -->"
-                text+= f"{uses} instr. per iter. / {pw} instr. per cycle = {cycles:0.2f}"
-                analysis["Throughput-Bottlenecks"].append(text)
+                cycles = uses / len(subset)
+                if cycles == max_cycles:
+                    port_str = ""
+                    mask_bit=1
+                    for j in range(n_ports):
+                        if mask_bit & mask == mask_bit:
+                            port_str += f"P{j}+"
+                        mask_bit *= 2
+
+                    text = f"Ports: {port_str[:-1]}, Instr.: {inst_str[:-1]} -->"
+                    text+= f"{uses} instr. per iter. / {len(subset)} instr. per cycle = {cycles:0.2f}"
+                    analysis["Throughput-Bottlenecks"].append(text)
 
         return json.dumps(analysis, indent=2)
 
