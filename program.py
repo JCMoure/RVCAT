@@ -40,6 +40,27 @@ class Instruction:
             "latency":  self.latency,
             "ports":    self.ports
         }
+    
+class Process:
+
+    def __init__(self) -> None:
+        self.dispatch = 1
+        self.retire   = 1
+        self.instruction_list = []
+
+    def from_json(data: dict):
+        process = Process()
+        process.dispatch         = data.get("dispatch", 1)
+        process.retire           = data.get("retire", 1)
+        process.instruction_list = data.get("instruction_list", [])
+        return process
+
+    def json(self) -> dict:
+        return {
+            "dispatch":         self.dispatch,
+            "retire":           self.retire,
+            "instruction_list": self.instruction_list
+        }
 
 class Program:
 
@@ -512,19 +533,15 @@ class Program:
 
         return out + "}\n"
 
-    def get_performance_analysis(self, process) -> dict:
+    def get_performance_analysis(self, processJSON) -> dict:
 
         analysis = { "name": self.name }
 
+        process = Process.from_json(processJSON)
         self.load_instruction_list(process.instruction_list)
 
-        # ports    = list( process.ports.keys() )
-        # n_ports  = len ( ports )
-
         # max_latency    = maximum latency per iteration
-        # min_iters      = minimum number of iterations for cyclic path
-        # path_latencies = [ (latency,iters), (,) .. ]  of cyclic paths
-        max_latency, min_iters, path_latencies = self.get_critical_latencies() 
+        max_latency, *_ = self.get_critical_latencies() 
 
         dw = process.dispatch
         rw = process.retire
