@@ -197,8 +197,8 @@ class Scheduler:
 
         return decode_stage + execute_stage + retire_stage
 
-    def generate_timeline(self):
-        rw              = _program.retire
+    def generate_timeline(self, ports):
+        rw              = self.retrWidth
         retired         = 0
         self.dispatched = 0
         self.cycles     = 0
@@ -206,7 +206,7 @@ class Scheduler:
         last_disp_cycle = 0
 
         timeline      = {i:[] for i in range(self.n + self.window.size + rw)}
-        port_timeline = {port:[] for port in _program.ports}
+        port_timeline = {port:[] for port in ports}
         MM_timeline   = []
         INSTR_Info    = []
 
@@ -257,19 +257,42 @@ class Scheduler:
 
         return timeline, port_timeline, MM_timeline, INSTR_Info, critical_path
 
-    def get_timeline(self, niters: int = 3, window_size: int=100) -> str:
+    def get_timeline(self, processJSON, niters: int = 3) -> str:
+
+        process = Process.from_json(processJSON)
+        _program.load_instruction_list(process.instruction_list)
 
         self.iterations = niters
-        self.window_size= window_size
-        self.window     = Window(window_size)
-        self.n          = niters*self.num_instr
+        self.window_size= process.ROBsize
+        self.window     = Window(process.ROBsize)
+        self.DepEdges   = _program.dependence_edges
+        self.dispWidth  = process.dispatch
+        self.retrWidth  = process.retire
+        self.mPenalty   = process.mPenalty
+        self.mIssueTime = process.mIssueTime
+        self.sched      = process.sched
+        self.blksize    = process.blksize
+        self.nBlocks    = process.nBlocks
 
+        if self.nBlocks > 0:
+            self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+
+        self.num_instr  = _program.n
+        self.n          = niters*self.num_instr
+        self.pc         = 0
         self.cycles     = 0
         self.dispatched = 0
-        self.pc         = 0
-        self.DepEdges   = _program.dependence_edges
 
-        timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline()
+        all_ports = 0
+        for instr in _program.instruction_list:
+            all_ports |= instr.ports
+        self.port_mask = all_ports
+
+        # list of used ports and number of used ports
+        ports        = [i for i in range(32) if (all_ports >> i) & 1]
+        self.n_ports = len(ports)
+
+        timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline(ports) 
         pad_iteration = len(str(niters-1))
         pad_i         = len(str(self.num_instr-1))
         pad           = pad_iteration + pad_i + 5
@@ -277,7 +300,7 @@ class Scheduler:
         out_cycles = f"{' '*pad}{' '.join([str(c_i%10) for c_i in range(self.cycles)])}\n"
 
         port_timeline = {}
-        for port in _program.ports:
+        for port in ports:
             port_timeline[port] = [False for i in range(self.cycles)]
 
         out_timeline = ""
