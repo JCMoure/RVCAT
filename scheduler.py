@@ -132,7 +132,7 @@ class Scheduler:
                   instr.substate  = InstrState.WAIT_BANDWIDTH
                   instr.exec_lat += 1
 
-        retires = _program.retire - rw
+        retires = self.retrWidth - rw
         return retires, used_ports, MM_access
 
     def dispatch(self):
