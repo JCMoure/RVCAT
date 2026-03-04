@@ -371,7 +371,7 @@ class Scheduler:
         last_disp_cycle = 0
 
         all_ports = 0
-        for instr in self.instruction_list:
+        for instr in _program.instruction_list:
             all_ports |= instr.ports
         self.port_mask = all_ports
 
