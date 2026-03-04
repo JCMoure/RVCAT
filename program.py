@@ -71,7 +71,7 @@ class Program:
         self.instruction_list = []
         for instr_dict in instrs:
             self.instruction_list.append(Instruction.from_json(instr_dict))
-        self.n            = len(instrs)        
+        self.n            = len(self.instruction_list)        
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)
         self.loop_carried = [] # index to list of variable names which are loop-carried
@@ -93,7 +93,7 @@ class Program:
         Reads3  = [] ## List of third output variable names in program's instruction order
         Consts  = [] ## List of constants in program's instruction order
 
-        for inst in instrs:
+        for inst in self.instruction_list:
             Outs.append  (inst.destin)
             Consts.append(inst.constant)
             Reads1.append(inst.source1)
