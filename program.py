@@ -2,6 +2,45 @@ import json
 
 global _program
 
+class Instruction:
+
+    def __init__(self) -> None:
+        self.type     = ""
+        self.text     = ""
+        self.destin   = ""
+        self.source1  = ""
+        self.source2  = ""
+        self.source3  = ""
+        self.constant = ""
+        self.latency  = 0
+        self.ports    = 0
+
+    def from_json(data: dict):
+        instr = Instruction()
+        instr.type     = data.get("type", "")
+        instr.text     = data.get("text", "")
+        instr.destin   = data.get("destin", "")
+        instr.source1  = data.get("source1", "")
+        instr.source2  = data.get("source2", "")
+        instr.source3  = data.get("source3", "")
+        instr.constant = data.get("constant", "")
+        instr.latency  = data.get("latency", 0)
+        instr.ports    = data.get("ports", 0)
+        return instr
+
+    def json(self) -> dict:
+        return {
+            "type":     self.type,
+            "text":     self.text,
+            "destin":   self.destin,
+            "source1":  self.source1,
+            "source2":  self.source2,
+            "source3":  self.source3,
+            "constant": self.constant,
+            "latency":  self.latency,
+            "ports":    self.ports
+        }
+
 class Program:
 
     def __init__(self) -> None:
@@ -29,8 +68,10 @@ class Program:
     # Load JSON object containing program specification
     def load_instruction_list(self, instrs) -> None:
 
-        self.instruction_list = instrs
-        self.n                = len(instrs)        
+        self.instruction_list = []
+        for instr_dict in instrs:
+            self.instruction_list.append(Instruction.from_json(instr_dict))
+        self.n            = len(instrs)        
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)
         self.loop_carried = [] # index to list of variable names which are loop-carried
@@ -574,6 +615,5 @@ class Program:
                     analysis["Throughput-Bottlenecks"].append(text)
 
         return json.dumps(analysis, indent=2)
-
 
 _program = Program()
