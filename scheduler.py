@@ -1,6 +1,7 @@
-from .window      import Window, InstrState
-from .program     import Program, _program
-from . import exec_graph as ex
+from .window   import Window, InstrState
+from .program  import Process, _program
+from .cache    import Cache
+from .         import exec_graph as ex
 import json
 
 global _scheduler
@@ -10,22 +11,32 @@ class Scheduler:
     def __init__(self) -> None:
         self.iterations = 0
         self.window_size= 1
+        self.dispWidth  = 1
+        self.retrWidth  = 1
+        self.sched      = "greedy"
+        self.blksize    = 1
+        self.nBlocks    = 1
+        self.mPenalty   = 0
+        self.mIssueTime = 0
+        self.port_mask  = 0
+        self.n_ports    = 0
+        self.cache      = None
         self.window     = Window(1)
+        self.num_instr  = 0
         self.n          = 0
         self.dispatched = 0
         self.pc         = 0
         self.cycles     = 0
         self.DepEdges   = []
 
-
     def next_cycle(self) -> int:
 
-        xw    = len(_program.ports)
-        rw    = _program.retire
-        sched = _program.sched != "greedy"
+        xw    = self.n_ports
+        rw    = self.retrWidth
+        sched = self.sched != "greedy"
 
         issue_queue = {}
-        used_ports  = {port:False for port in _program.ports}
+        used_ports  = {port:False for port in range(32) if (self.port_mask >> port) & 1}
         MM_access   = -1
 
         for window_idx in range(self.window.count):
@@ -53,6 +64,9 @@ class Scheduler:
 
             elif instr.state == InstrState.DISPATCH:
 
+                # Memory Access
+                # self.cache.access(mType, Addr, cycles)
+
                 if instr.substate in [InstrState.NONE, InstrState.WAIT_DATA]:
                     instr.substate = InstrState.NONE
                   
@@ -66,12 +80,12 @@ class Scheduler:
                                 break
 
                 if instr.substate != InstrState.WAIT_DATA:
-                    instr_type     = _program[static_idx].type
-                    resource       = _program.get_resource(instr_type)
-                    latency, ports = resource
+                    port_mask = _program.instruction_list[static_idx].ports
+                    latency   = _program.instruction_list[static_idx].latency
                     if not sched:  # Greedy scheduling algorithm
                       if xw:
-                        for port in ports:
+                        required_ports  = {port:False for port in range(32) if (port_mask >> port) & 1}
+                        for port in required_ports:
                             if not used_ports[port]:
                                 used_ports[port] = True
                                 instr.exec_cycle = self.cycles
@@ -90,7 +104,7 @@ class Scheduler:
                         instr.exec_lat += 1
 
                     else:   # Optimal scheduling: first priority is age, second is using most ports
-                      issue_queue[window_idx] = ports
+                      issue_queue[window_idx] = required_ports
                       instr.latency           = latency
 
             elif instr.state != InstrState.RETIRE:
@@ -121,18 +135,16 @@ class Scheduler:
         retires = _program.retire - rw
         return retires, used_ports, MM_access
 
-
     def dispatch(self):
-        dw = _program.dispatch
+        dw = self.dispWidth
         while self.dispatched < self.n and dw and not self.window.is_full():
-            static_idx = self.pc % _program.n
+            static_idx = self.pc % self.num_instr
             self.window.push(self.cycles, self.pc, static_idx, "", 0)
             self.pc += 1
             dw      -= 1
             self.dispatched +=1
 
         self.cycles += 1
-
 
     def generate_timeline_state ( self, dynamic_idx, stages, critical_path):
         
@@ -185,7 +197,6 @@ class Scheduler:
 
         return decode_stage + execute_stage + retire_stage
 
-
     def generate_timeline(self):
         rw              = _program.retire
         retired         = 0
@@ -199,7 +210,7 @@ class Scheduler:
         MM_timeline   = []
         INSTR_Info    = []
 
-        ExecGraph     = ex.generate_execution_graph( _program, self.n, self.window_size, self.DepEdges )
+        ExecGraph     = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
         while retired < self.n:
             retires, used_ports, MM_access = self.next_cycle()
@@ -246,13 +257,12 @@ class Scheduler:
 
         return timeline, port_timeline, MM_timeline, INSTR_Info, critical_path
 
-
     def get_timeline(self, niters: int = 3, window_size: int=100) -> str:
 
         self.iterations = niters
         self.window_size= window_size
         self.window     = Window(window_size)
-        self.n          = niters*_program.n
+        self.n          = niters*self.num_instr
 
         self.cycles     = 0
         self.dispatched = 0
@@ -261,7 +271,7 @@ class Scheduler:
 
         timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline()
         pad_iteration = len(str(niters-1))
-        pad_i         = len(str(_program.n-1))
+        pad_i         = len(str(self.num_instr-1))
         pad           = pad_iteration + pad_i + 5
 
         out_cycles = f"{' '*pad}{' '.join([str(c_i%10) for c_i in range(self.cycles)])}\n"
@@ -275,8 +285,8 @@ class Scheduler:
         for i, cycles in timeline.items():
             if not cycles or i >= self.n:
                 break
-            iteration  = i // _program.n
-            i_mod      = i %  _program.n
+            iteration  = i // self.num_instr
+            i_mod      = i %  self.num_instr
             if i_mod == 0:
               pad_list.append([cycles[0][0],0])
 
@@ -285,8 +295,8 @@ class Scheduler:
         for i, cycles in timeline.items():
             if not cycles or i >= self.n:
                 break
-            iteration = i // _program.n
-            i_mod     = i %  _program.n
+            iteration = i // self.num_instr
+            i_mod     = i %  self.num_instr
             init_pad  = pad_list[iteration][0] - 1
             if init_pad < 0:
               init_pad  = 0
@@ -329,27 +339,48 @@ class Scheduler:
 
         return out_cycles + out_Ports + out_MM + "\n" + out_cycles + out_timeline
 
+    def get_results(self, processJSON, niters: int = 3) -> str:
 
-    def get_results(self, niters: int = 3, window_size: int=100) -> str:
-    
+        process = Process.from_json(processJSON)
+        _program.load_instruction_list(process.instruction_list)
+
         self.iterations = niters
-        self.window_size= window_size
-        self.window     = Window(window_size)
-        self.n          = niters*_program.n
-
-        self.pc         = 0
+        self.window_size= process.ROBsize
+        self.window     = Window(process.ROBsize)
         self.DepEdges   = _program.dependence_edges
+        self.dispWidth  = process.dispatch
+        self.retrWidth  = process.retire
+        self.mPenalty   = process.mPenalty
+        self.mIssueTime = process.mIssueTime
+        self.sched      = process.sched
+        self.blksize    = process.blksize
+        self.nBlocks    = process.nBlocks
 
-        retired         = 0
+        if self.nBlocks > 0:
+            self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+
+
+        self.num_instr  = _program.n
+        self.n          = niters*self.num_instr
+        self.pc         = 0
         self.cycles     = 0
         self.dispatched = 0
+
+        retired         = 0
         last_ret_cycle  = 0
         last_disp_cycle = 0
 
-        ports      = _program.ports
+        all_ports = 0
+        for instr in self.instruction_list:
+            all_ports |= instr.ports
+        self.port_mask = all_ports
+
+        # list of used ports and number of used ports
+        ports   = [i for i in range(32) if (all_ports >> i) & 1]
+        self.n_ports = len(used_ports)
         port_usage = {port:0 for port in ports}
 
-        ExecGraph  = ex.generate_execution_graph( _program, self.n, self.window_size, self.DepEdges )
+        ExecGraph  = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
         while retired < self.n:
             retires, used_ports, _ = self.next_cycle()
@@ -381,23 +412,21 @@ class Scheduler:
         critical_path = ex.longest_path(ExecGraph)
 
         cycles_per_iter = self.cycles / self.iterations
-        IPC             = self.n / self.cycles
+        IPC             = self.n      / self.cycles
 
         out = {}
-
         out["total_iterations"]     = self.iterations
         out["total_instructions"]   = self.n
         out["total_cycles"]         = self.cycles
         out["ipc"]                  = IPC
         out["cycles_per_iteration"] = cycles_per_iter
-
         out["ports"] = {}
         for port in ports:
            usage = port_usage[port]/self.cycles
            out["ports"][str(port)] = usage*100
 
-        if _program.cache != None:
-            MM_usage, MM_Rd_usage, RdMisses, WrMisses = _program.cache.statistics(self.cycles)
+        if self.cache != None:
+            MM_usage, MM_Rd_usage, RdMisses, WrMisses = self.cache.statistics(self.cycles)
         else:
             MM_usage, MM_Rd_usage, RdMisses, WrMisses = 0, 0, 0, 0
 
@@ -406,8 +435,7 @@ class Scheduler:
         out["read_misses"]    = RdMisses
         out["write_misses"]   = WrMisses
 
-        out["critical_path"]   = ex.critical_path_statistics_json(_program, critical_path)
+        out["critical_path"]   = ex.critical_path_statistics_json(self.num_instr, _program.instruction_list, critical_path)
         return json.dumps(out)
-
 
 _scheduler = Scheduler()

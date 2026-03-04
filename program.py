@@ -47,6 +47,7 @@ class Process:
         self.name     = ""
         self.dispatch = 1
         self.retire   = 1
+        self.ROBsize  = 20 
         self.instruction_list = []
 
     def from_json(data: dict):
@@ -54,6 +55,7 @@ class Process:
         process.name             = data.get("name", "")
         process.dispatch         = data.get("dispatch", 1)
         process.retire           = data.get("retire", 1)
+        process.ROBsize          = data.get("ROBsize", 20)
         process.instruction_list = data.get("instruction_list", [])
         return process
 
@@ -62,6 +64,7 @@ class Process:
             "name":             self.name,
             "dispatch":         self.dispatch,
             "retire":           self.retire,
+            "ROBsize":          self.ROBsize,
             "instruction_list": self.instruction_list
         }
 
@@ -541,16 +544,9 @@ class Program:
 
         analysis = { "name": process.name }
         
-        # max_latency    = maximum latency per iteration
-        max_latency, *_ = self.get_critical_latencies() 
-
         dw = process.dispatch
         rw = process.retire
 
-        dw_cycles = self.n / dw
-        rw_cycles = self.n / rw
-
-        # Mask of used ports
         all_ports = 0
         for instr in self.instruction_list:
             all_ports |= instr.ports
@@ -558,6 +554,12 @@ class Program:
         # list of used ports and number of used ports
         used_ports = [i for i in range(32) if (all_ports >> i) & 1]
         n_ports = len(used_ports)
+
+        dw_cycles = self.n / dw
+        rw_cycles = self.n / rw
+
+        # max_latency    = maximum latency per iteration
+        max_latency, *_ = self.get_critical_latencies() 
 
         # All combinations of this ports
         from itertools import combinations

@@ -27,11 +27,9 @@ def old_priority(isps):
       dfs()
       return dict(zip(_ais, _aps))
 
-
-def generate_execution_graph (program, N, window_size, DepEdges):
+def generate_execution_graph (static_instructions, N, window_size, DepEdges):
 
    ExecGraph = []
-   static_instructions = program.n
         
    # First Node contains a fake arch on dispatch node and retire node, 
    # that will be removed after inserting values
@@ -58,25 +56,11 @@ def generate_execution_graph (program, N, window_size, DepEdges):
 
    return ExecGraph
 
-
-def get_iteration_idx( program, index ):
+def get_iteration_idx( n, index ):
      instr_idx = index // 3
-     static_idx= instr_idx  % program.n
-     iteration = instr_idx // program.n
+     static_idx= instr_idx  % n
+     iteration = instr_idx // n
      return iteration, static_idx
-
-
-def get_node_arch ( program, index, cost ):
-     iteration, idx = get_iteration_idx(program, index)
-     name = f" --({cost})--> [{iteration},{idx}]"
-     if     index%3 == 0:
-         name += "Disp"
-     elif   index%3 == 1:
-         name += "eXec"
-     else:
-         name += "Retr"
-     return name
-
 
 def longest_path (ExecGraph):
       N = len(ExecGraph)
@@ -94,56 +78,7 @@ def longest_path (ExecGraph):
 
       return path[0]
 
-
-def get_list_of_edges (list):
-     str = ""
-     for node in list:
-         str += get_node_arch(node[0], node[1]) + " ; " 
-     return str
-
-
-def print_path (path):
-     path_str = f"CRITICAL Path:\n      "
-     count = 5
-     for node in path:
-         path_str += get_node_arch(node[0], node[1]) + " "
-         count -= 1
-         if count == 0:
-             count = 5
-             path_str += "\n      "
-
-     print(path_str+"\n")
-
-
-def critical_path_statistics (program, path):
-     N         = program.n
-     total_lat = 0
-     histogram = [0 for i in range(N)]
-     decode_lat= 0
-     retire_lat= 0
-        
-     for node in path:
-         stage = node[0] % 3
-         iteration, idx = get_iteration_idx(program, node[0])
-         if stage == 1:
-             histogram[idx] += node[1]
-         elif stage == 0:
-             decode_lat += node[1]
-         else:
-             retire_lat += node[1]
-         total_lat += node[1]
-
-     out = ""
-     for i in range(N):
-         out += f"    Instr. {i:2}: {100*histogram[i]/total_lat:0.2f}%\n"
-
-     out += f"    DISPATCH : {100*decode_lat/total_lat:0.2f}%\n"
-     out += f"    RETIRE   : {100*retire_lat/total_lat:0.2f}%\n"
-     return out
-
-
-def critical_path_statistics_json (program, path):
-    N         = program.n
+def critical_path_statistics_json (N, instr_list, path):
     total_lat = 0
     histogram = [0 for i in range(N)]
     decode_lat= 0
@@ -151,7 +86,7 @@ def critical_path_statistics_json (program, path):
 
     for node in path:
          stage = node[0] % 3
-         iteration, idx = get_iteration_idx(program, node[0])
+         iteration, idx = get_iteration_idx(N, node[0])
          if stage == 1:
              histogram[idx] += node[1]
          elif stage == 0:
@@ -163,27 +98,13 @@ def critical_path_statistics_json (program, path):
     out = {'instructions': []}
     for i in range(N):
         out['instructions'].append({'id': i,
-                                    'instruction': program.instruction_list[i].text,
+                                    'instruction': instr_list[i].text,
                                     'percentage': 100*histogram[i]/total_lat})
 
     out['dispatch'] = 100*decode_lat/total_lat
     out['retire']   = 100*retire_lat/total_lat
 
     return out
-
-
-def print_graph ( program, ExecGraph ):
-     n_times_3 = len( ExecGraph )
-     n         = n_times_3 // 3
-     for i in range(n):
-         static_idx= i % program.n
-         iteration = i // program.n
-         out  = f"[{iteration},{static_idx}]:\n"
-         out += f"   Dispatch= {get_list_of_edges(ExecGraph[i*3])}\n"
-         out += f"   Execute = {get_list_of_edges(ExecGraph[i*3+1])}\n"
-         out += f"   Retire  = {get_list_of_edges(ExecGraph[i*3+2])}\n"
-     print(out)
-
 
 def exec_graph_update(ExecGraph, dynamic_idx, disp_latency, exec_latency, ret_latency):
 
@@ -206,3 +127,47 @@ def exec_graph_update(ExecGraph, dynamic_idx, disp_latency, exec_latency, ret_la
         ExecGraph[0].pop(-1)  # remove last arch from first dispatch node
         ExecGraph[2].pop(-1)  # remove last arch from first retire node
 
+# NOT USED, but useful for debugging
+def get_node_arch ( n, index, cost ):
+     iteration, idx = get_iteration_idx(n, index)
+     name = f" --({cost})--> [{iteration},{idx}]"
+     if     index%3 == 0:
+         name += "Disp"
+     elif   index%3 == 1:
+         name += "eXec"
+     else:
+         name += "Retr"
+     return name
+
+# NOT USED, but useful for debugging
+def print_graph ( n, ExecGraph ):
+
+    def get_list_of_edges (list):
+        str = ""
+        for node in list:
+            str += get_node_arch(node[0], node[1]) + " ; " 
+        return str 
+    
+    n_times_3 = len( ExecGraph )
+    N         = n_times_3 // 3
+    for i in range(N):
+        static_idx= i % n
+        iteration = i // n
+        out  = f"[{iteration},{static_idx}]:\n"
+        out += f"   Dispatch= {get_list_of_edges(ExecGraph[i*3])}\n"
+        out += f"   Execute = {get_list_of_edges(ExecGraph[i*3+1])}\n"
+        out += f"   Retire  = {get_list_of_edges(ExecGraph[i*3+2])}\n"
+    print(out)
+
+# NOT USED, but useful for debugging
+def print_path (path):
+     path_str = f"CRITICAL Path:\n      "
+     count = 5
+     for node in path:
+         path_str += get_node_arch(node[0], node[1]) + " "
+         count -= 1
+         if count == 0:
+             count = 5
+             path_str += "\n      "
+
+     print(path_str+"\n")
