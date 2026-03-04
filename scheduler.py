@@ -82,9 +82,9 @@ class Scheduler:
                 if instr.substate != InstrState.WAIT_DATA:
                     port_mask = _program.instruction_list[static_idx].ports
                     latency   = _program.instruction_list[static_idx].latency
+                    required_ports= [port for port in range(32) if (port_mask >> port) & 1]
                     if not sched:  # Greedy scheduling algorithm
                       if xw:
-                        required_ports  = {port:False for port in range(32) if (port_mask >> port) & 1}
                         for port in required_ports:
                             if not used_ports[port]:
                                 used_ports[port] = True
