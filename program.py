@@ -44,12 +44,14 @@ class Instruction:
 class Process:
 
     def __init__(self) -> None:
+        self.name     = ""
         self.dispatch = 1
         self.retire   = 1
         self.instruction_list = []
 
     def from_json(data: dict):
         process = Process()
+        process.name             = data.get("name", "")
         process.dispatch         = data.get("dispatch", 1)
         process.retire           = data.get("retire", 1)
         process.instruction_list = data.get("instruction_list", [])
@@ -57,6 +59,7 @@ class Process:
 
     def json(self) -> dict:
         return {
+            "name":             self.name,
             "dispatch":         self.dispatch,
             "retire":           self.retire,
             "instruction_list": self.instruction_list
@@ -67,7 +70,6 @@ class Program:
     def __init__(self) -> None:
 
         # data loaded/stored which do not change during execution
-        self.name             = ""
         self.n                = 0
         self.instruction_list = []
 
@@ -84,7 +86,6 @@ class Program:
 
     def __getitem__(self, i: int):
         return self.instruction_list[i%self.n]
-
 
     # Load JSON object containing program specification
     def load_instruction_list(self, instrs) -> None:
@@ -535,11 +536,11 @@ class Program:
 
     def get_performance_analysis(self, processJSON) -> dict:
 
-        analysis = { "name": self.name }
-
         process = Process.from_json(processJSON)
         self.load_instruction_list(process.instruction_list)
 
+        analysis = { "name": process.name }
+        
         # max_latency    = maximum latency per iteration
         max_latency, *_ = self.get_critical_latencies() 
 
