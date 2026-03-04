@@ -49,6 +49,11 @@ class Process:
         self.retire   = 1
         self.ROBsize  = 20 
         self.instruction_list = []
+        self.mPenalty   = 1
+        self.mIssueTime = 1
+        self.sched      = "greedy"
+        self.blksize    = 16
+        self.nBlocks    = 0
 
     def from_json(data: dict):
         process = Process()
@@ -57,6 +62,11 @@ class Process:
         process.retire           = data.get("retire", 1)
         process.ROBsize          = data.get("ROBsize", 20)
         process.instruction_list = data.get("instruction_list", [])
+        process.mPenalty          = data.get("mPenalty", 1) 
+        process.mIssueTime       = data.get("mIssueTime", 1)
+        process.sched            = data.get("sched", "greedy")
+        process.blksize          = data.get("blksize", 16)
+        process.nBlocks          = data.get("nBlocks", 0)
         return process
 
     def json(self) -> dict:
@@ -65,7 +75,12 @@ class Process:
             "dispatch":         self.dispatch,
             "retire":           self.retire,
             "ROBsize":          self.ROBsize,
-            "instruction_list": self.instruction_list
+            "instruction_list": self.instruction_list,
+            "mPenalty":         self.mPenalty,
+            "mIssueTime":       self.mIssueTime,
+            "sched":            self.sched,
+            "blksize":          self.blksize,
+            "nBlocks":          self.nBlocks
         }
 
 class Program:
