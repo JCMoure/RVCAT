@@ -376,9 +376,9 @@ class Scheduler:
         self.port_mask = all_ports
 
         # list of used ports and number of used ports
-        ports   = [i for i in range(32) if (all_ports >> i) & 1]
-        self.n_ports = len(used_ports)
-        port_usage = {port:0 for port in ports}
+        ports        = [i for i in range(32) if (all_ports >> i) & 1]
+        self.n_ports = len(ports)
+        port_usage   = {port:0 for port in ports}
 
         ExecGraph  = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
