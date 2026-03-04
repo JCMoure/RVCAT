@@ -320,7 +320,7 @@ class Program:
         colors = ["lightblue", "greenyellow", "lightyellow", 
                   "lightpink", "lightgrey",   "lightcyan", "lightcoral"]
 
-        self.load_instruction_list(self, instrs)
+        self.load_instruction_list(instrs)
 
         recurrent_paths = self.cyclic_paths
 
@@ -516,7 +516,7 @@ class Program:
 
         analysis = { "name": self.name }
 
-        self.load_instruction_list(self, process.instruction_list)
+        self.load_instruction_list(process.instruction_list)
 
         # ports    = list( process.ports.keys() )
         # n_ports  = len ( ports )
