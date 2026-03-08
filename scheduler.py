@@ -358,7 +358,7 @@ class Scheduler:
         out_Ports = ""
         for port, cycles in port_timeline.items():
             usage = " ".join(["X" if used else " " for used in cycles])
-            out_Ports += f"P.{port:{pad_iteration+pad_i+2}} {usage}\n"
+            out_Ports += f"P.{port}{"":<{pad_iteration+pad_i+2}} {usage}\n"
 
         return out_cycles + out_Ports + out_MM + "\n" + out_cycles + out_timeline
 
