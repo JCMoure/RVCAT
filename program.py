@@ -461,10 +461,10 @@ class Program:
                             path = path+1
                         (lat,iters) = path_latencies[path]
                         if iters==1:
-                            out += f" : <FONT COLOR=\"blue\">{lat} cycles/iter</FONT></B>>"
+                            out += f" : <FONT COLOR=\"blue\">{lat} cycles/iter</FONT>"
                         else:
-                            out += f" : <FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT></B>>"
-                   out += f", tooltip=\"cyclic path\"];\n"
+                            out += f" : <FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT>"
+                   out += f"</B>>, tooltip=\"cyclic path\"];\n"
                else:
                    out += f"[label=<<B>{var}</B>>, tooltip=\"not cyclic\", fontcolor=blue];\n"
         out += " }\n"
