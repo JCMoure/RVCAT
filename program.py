@@ -454,19 +454,19 @@ class Program:
            if show_internal or cyclic:
                out += f"  OutCar{LoopCar_id} "
                if cyclic:
-                   out += f"[label=<<B>{var} : "
-                   path = 0
-                   while inst_id not in recurrent_paths[path]:
-                       path = path+1
-                   (lat,iters) = path_latencies[path]
-                   if iters==1:
-                     out += f"<FONT COLOR=\"blue\">{lat} cycles/iter</FONT></B>>"
-                   else:
-                     out += f"<FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT></B>>"
+                   out += f"[label=<<B>{var}"
+                   if show_latency:
+                        path = 0
+                        while inst_id not in recurrent_paths[path]:
+                            path = path+1
+                        (lat,iters) = path_latencies[path]
+                        if iters==1:
+                            out += f" : <FONT COLOR=\"blue\">{lat} cycles/iter</FONT></B>>"
+                        else:
+                            out += f" : <FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT></B>>"
                    out += f", tooltip=\"cyclic path\"];\n"
                else:
                    out += f"[label=<<B>{var}</B>>, tooltip=\"not cyclic\", fontcolor=blue];\n"
-
         out += " }\n"
 
         out += " { rank=max; "
