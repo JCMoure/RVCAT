@@ -316,7 +316,7 @@ class Scheduler:
             instr = [
                 i // self.num_instr,   # loop iteration
                 i % self.num_instr,    # instruction Index
-                cycles[0][1],          # starting cycle
+                cycles[0][0],          # starting cycle
                 INSTR_Info[i][1],      # port
                 stages,                # states
                 criticalList           # critical states

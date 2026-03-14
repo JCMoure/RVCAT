@@ -62,7 +62,7 @@ class Process:
         process.retire           = data.get("retire", 1)
         process.ROBsize          = data.get("ROBsize", 20)
         process.instruction_list = data.get("instruction_list", [])
-        process.mPenalty          = data.get("mPenalty", 1) 
+        process.mPenalty         = data.get("mPenalty", 1) 
         process.mIssueTime       = data.get("mIssueTime", 1)
         process.sched            = data.get("sched", "greedy")
         process.blksize          = data.get("blksize", 16)
