@@ -293,75 +293,43 @@ class Scheduler:
         self.n_ports = len(ports)
 
         timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline(ports) 
-        pad_iteration = len(str(niters-1))
-        pad_i         = len(str(self.num_instr-1))
-        pad           = pad_iteration + pad_i + 5
-
-        out_cycles = f"{' '*pad}{' '.join([str(c_i%10) for c_i in range(self.cycles)])}\n"
 
         port_timeline = {}
         for port in ports:
             port_timeline[port] = [False for i in range(self.cycles)]
 
-        out_timeline = ""
-        pad_list = []
-        for i, cycles in timeline.items():
-            if not cycles or i >= self.n:
-                break
-            iteration  = i // self.num_instr
-            i_mod      = i %  self.num_instr
-            if i_mod == 0:
-              pad_list.append([cycles[0][0],0])
-
-            pad_list[iteration][1] = cycles[0][0] + len(cycles)
+        instructions = []    # List of timeline.instructions
 
         for i, cycles in timeline.items():
+
             if not cycles or i >= self.n:
                 break
-            iteration = i // self.num_instr
-            i_mod     = i %  self.num_instr
-            init_pad  = pad_list[iteration][0] - 1
-            if init_pad < 0:
-              init_pad  = 0
-            medium_pad= cycles[0][0]-init_pad
-            end_pad   = pad_list[iteration][1] - len(cycles) - (init_pad+medium_pad)
 
             stages = self.generate_timeline_state( i, [s for _,s in cycles], critical_path)
-            instr  = _program[i_mod]
 
-            out_timeline += f"{'  '*init_pad}[{iteration:{pad_iteration}},{i_mod:{pad_i}}]{'  '*medium_pad}"
-            out_timeline += f"{stages}{'  '*end_pad}     "
-            out_timeline += f"{instr.text}"
-            out_timeline += f" (P.{INSTR_Info[i][1]})"
+            instr = []
+            instr.push(i // self.num_instr) # loop iteration
+            instr.push(i %  self.num_instr) # instruction Index
+            instr.push(s)                   # starting cycle for processing this instruction
+            instr.push(INSTR_Info[i][1])    # port used by this instruction
+            instr.push(stages)              # sequence of processing states
+            instr.push([])                  # critical states of the processing of this instruction
 
-            port_timeline[ INSTR_Info[i][1] ][ INSTR_Info[i][0] ] = True
-
-            if iteration == 0:
-                out_timeline += f" {instr.type}"
-
-            if INSTR_Info[i][2] >= 0:
-                 out_timeline += f" [Addr= {INSTR_Info[i][2]}]"
-
-            out_timeline   += "\n"
+            instructions.push(instr)   # insert new instruction in timeline structure
 
         Cycle = 0
-        usage = "  "
+        MM_usage = "  "
         for use_time in MM_timeline:
             if use_time >= self.cycles:
                 break
-            usage += "  "*(use_time-Cycle-1)+"# "
+            MM_usage += "  "*(use_time-Cycle-1)+"# "
             Cycle = use_time
 
-        name = "MM"
-        out_MM = f"{name:{pad_iteration+pad_i+2}} {usage}\n"
+        timelineJson                 = {}
+        timelineJson["cycles"]       = self.cycles
+        timelineJson["instructions"] = instructions
 
-        out_Ports = ""
-        for port, cycles in port_timeline.items():
-            p = ""
-            usage = " ".join(["X" if used else " " for used in cycles])
-            out_Ports += f"P.{port}{p:{pad_iteration+pad_i+2}} {usage}\n"
-
-        return out_cycles + out_Ports + out_MM + "\n" + out_cycles + out_timeline
+        return json.dumps(timelineJson)
 
     def get_results(self, processJSON, niters: int = 3) -> str:
 
