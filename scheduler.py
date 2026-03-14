@@ -148,21 +148,26 @@ class Scheduler:
 
     def generate_timeline_state ( self, dynamic_idx, stages, critical_path):
         
+        criticalList = []
+
         # Decode Stage
-        decode_stage = stages[0].value + ' '
+        decode_stage = "D"
         stages.pop(0)
+
         if len(critical_path) > 0:
           node = critical_path[-1]
           idx  = node[0] // 3
           stage= node[0] % 3
           if idx == dynamic_idx and stage == 0:
-              if node[1] == 1:
-                   decode_stage = "\033[91m" + decode_stage + "\033[0m"
-              critical_path.pop(-1)
+            if node[1] == 1:
+                criticalList.append(0)  # Decode stage is in critical path
+            critical_path.pop(-1)
 
+        cycle = 1
         while stages[0] == InstrState.WAIT_DATA:
-            decode_stage += stages[0].value + ' '
+            decode_stage += stages[0].value
             stages.pop(0)
+            cycle = cycle+1
         
         # Execute Stage
         execute_stage = ""
@@ -173,19 +178,20 @@ class Scheduler:
           idx  = node[0] // 3
           stage= node[0] % 3
           if idx == dynamic_idx and stage == 1:
-              count = node[1]
-              execute_stage = "\033[91m"
-              critical_path.pop(-1)
+            count = node[1]
+            criticalList.append(cycle)  # Execute stage is in critical path
+            critical_path.pop(-1)
         
         while stages[0] != InstrState.RETIRE:
-            execute_stage += stages[0].value + ' '
+            execute_stage += stages[0].value
             stages.pop(0)
-            count = count-1
-            if count == 0:
-                execute_stage += "\033[0m"
+            cycle = cycle+1
+            if count > 0:
+                count = count-1
+                criticalList.append(cycle)  # Execute stage is in critical path
         
         # Retire Stage
-        retire_stage = "R "
+        retire_stage = "R"
         if len(critical_path) > 0:
           node = critical_path[-1]
           idx  = node[0] // 3
@@ -193,9 +199,9 @@ class Scheduler:
           if idx == dynamic_idx and stage == 2:
               critical_path.pop(-1)
               if node[1] == 1:
-                   retire_stage = "\033[91m" + "R "+ "\033[0m"
+                criticalList.append(cycle)  # Execute stage is in critical path
 
-        return decode_stage + execute_stage + retire_stage
+        return (decode_stage + execute_stage + retire_stage, criticalList)
 
     def generate_timeline(self, ports):
         rw              = self.retrWidth
@@ -305,7 +311,7 @@ class Scheduler:
             if not cycles or i >= self.n:
                 break
 
-            stages = self.generate_timeline_state( i, [s for _,s in cycles], critical_path)
+            stages, criticalList = self.generate_timeline_state( i, [s for _,s in cycles], critical_path)
 
             instr = [
                 i // self.num_instr,   # loop iteration
@@ -313,17 +319,17 @@ class Scheduler:
                 cycles[0][1],          # starting cycle
                 INSTR_Info[i][1],      # port
                 stages,                # states
-                []                     # critical states
+                criticalList           # critical states
             ]
             instructions.append(instr)   # insert new instruction in timeline structure
 
-        Cycle = 0
-        MM_usage = "  "
-        for use_time in MM_timeline:
-            if use_time >= self.cycles:
-                break
-            MM_usage += "  "*(use_time-Cycle-1)+"# "
-            Cycle = use_time
+        # Cycle = 0
+        # MM_usage = "  "
+        # for use_time in MM_timeline:
+        #     if use_time >= self.cycles:
+        #        break
+        #    MM_usage += "  "*(use_time-Cycle-1)+"# "
+        #    Cycle = use_time
 
         timelineJson                 = {}
         timelineJson["cycles"]       = self.cycles
