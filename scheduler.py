@@ -310,7 +310,7 @@ class Scheduler:
             instr = []
             instr.push(i // self.num_instr) # loop iteration
             instr.push(i %  self.num_instr) # instruction Index
-            instr.push(s)                   # starting cycle for processing this instruction
+            instr.push(cycles[0][1])        # starting cycle for processing this instruction
             instr.push(INSTR_Info[i][1])    # port used by this instruction
             instr.push(stages)              # sequence of processing states
             instr.push([])                  # critical states of the processing of this instruction
