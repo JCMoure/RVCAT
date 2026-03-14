@@ -307,15 +307,15 @@ class Scheduler:
 
             stages = self.generate_timeline_state( i, [s for _,s in cycles], critical_path)
 
-            instr = []
-            instr.push(i // self.num_instr) # loop iteration
-            instr.push(i %  self.num_instr) # instruction Index
-            instr.push(cycles[0][1])        # starting cycle for processing this instruction
-            instr.push(INSTR_Info[i][1])    # port used by this instruction
-            instr.push(stages)              # sequence of processing states
-            instr.push([])                  # critical states of the processing of this instruction
-
-            instructions.push(instr)   # insert new instruction in timeline structure
+            instr = [
+                i // self.num_instr,   # loop iteration
+                i % self.num_instr,    # instruction Index
+                cycles[0][1],          # starting cycle
+                INSTR_Info[i][1],      # port
+                stages,                # states
+                []                     # critical states
+            ]
+            instructions.append(instr)   # insert new instruction in timeline structure
 
         Cycle = 0
         MM_usage = "  "
