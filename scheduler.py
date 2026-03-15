@@ -178,7 +178,7 @@ class Scheduler:
           idx  = node[0] // 3
           stage= node[0] % 3
           if idx == dynamic_idx and stage == 1:
-            count = node[1]
+            count = node[1]-1
             criticalList.append(cycle)  # Execute stage is in critical path
             critical_path.pop(-1)
         
@@ -300,10 +300,6 @@ class Scheduler:
 
         timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline(ports) 
 
-        port_timeline = {}
-        for port in ports:
-            port_timeline[port] = [False for i in range(self.cycles)]
-
         instructions = []    # List of timeline.instructions
 
         for i, cycles in timeline.items():
@@ -316,7 +312,7 @@ class Scheduler:
             instr = [
                 i // self.num_instr,   # loop iteration
                 i % self.num_instr,    # instruction Index
-                cycles[0][0],          # starting cycle
+                cycles[0][0]-1,        # starting cycle
                 INSTR_Info[i][1],      # port
                 stages,                # states
                 criticalList           # critical states
