@@ -13,7 +13,7 @@ class Scheduler:
         self.window_size= 1
         self.dispWidth  = 1
         self.retrWidth  = 1
-        self.sched      = "greedy"
+        self.sched      = "optimal"
         self.blksize    = 1
         self.nBlocks    = 1
         self.mPenalty   = 0
