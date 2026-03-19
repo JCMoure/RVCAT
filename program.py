@@ -557,7 +557,7 @@ class Program:
         process = Process.from_json(processJSON)
         self.load_instruction_list(process.instruction_list)
 
-        analysis = { "name": process.name }
+        analysis = { "name": getattr(process, 'name', '') }
         
         dw = process.dispatch
         rw = process.retire
