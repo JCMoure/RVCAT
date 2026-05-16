@@ -148,7 +148,7 @@ class Scheduler:
             static_idx = self.pc % self.num_instr
             instr_mem  = 0
             addr       = -1
-            instr      = self.program[static_idx]
+            instr      = _program[static_idx]
             if instr.type == "MEM" or instr.type == "VMEM":
                 instr_mem  = 1 if instr.oper == "LOAD" else 2
                 addr       = instr.addr
