@@ -301,7 +301,7 @@ class Scheduler:
         _program.assign_memory_addresses(self.iterations)
         
         if self.nBlocks > 0:
-            self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+            self.cache  = Cache(self.nBlocks, self.blksize, self.mPenalty, self.mIssueTime)
 
         self.num_instr  = _program.n
         self.n          = niters*self.num_instr
@@ -366,7 +366,7 @@ class Scheduler:
         _program.assign_memory_addresses(self.iterations)
         
         if self.nBlocks > 0:
-            self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+            self.cache  = Cache(self.nBlocks, self.blksize, self.mPenalty, self.mIssueTime)
 
         self.num_instr  = _program.n
         self.n          = niters*self.num_instr
