@@ -302,18 +302,19 @@ class Program:
             for inst in self.instruction_list:
                 if inst.type == "MEM" or inst.type == "VMEM":
                     if (arrayName == inst.source2):
+                        const = 0 if inst.constant == "" else int(inst.constant)
                         dataSize = 4 if inst.type == "word" else (8 if inst.type == "long" else 1)
                         inst.byte_stride = dataSize*inst.lanes*inst.stride
                         if inst.stride < 0: # if stride is negative, then it is a reverse access starting from the end of the array
-                           inst.addr = init_addr + (N-inst.constant)*dataSize
+                           inst.addr = init_addr + (N-const)*dataSize
                            last_addr = inst.addr + (iterations-1)*inst.byte_stride
                            array_size = max(array_size, inst.addr+dataSize*inst.lanes)
                         elif inst.stride > 0:  # if stride is positive, then it is a forward access starting from the beginning of the array
-                           inst.addr = init_addr + inst.constant*dataSize
+                           inst.addr = init_addr + const*dataSize
                            last_addr = inst.addr + (iterations-1)*inst.byte_stride
                            array_size = max(array_size, last_addr+dataSize*inst.lanes)
                         else:  # if stride is zero, then it is an offset starting from the beginning of the array
-                           inst.addr = init_addr + inst.constant*dataSize
+                           inst.addr = init_addr + const*dataSize
                            last_addr = inst.addr + inst.byte_stride
                            array_size = max(array_size, last_addr+dataSize*inst.lanes)
 
