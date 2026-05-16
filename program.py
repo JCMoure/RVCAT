@@ -6,6 +6,8 @@ class Instruction:
 
     def __init__(self) -> None:
         self.type     = ""
+        self.oper     = ""
+        self.size     = ""
         self.text     = ""
         self.destin   = ""
         self.source1  = ""
@@ -20,7 +22,9 @@ class Instruction:
 
     def from_json(data: dict):
         instr = Instruction()
+        instr.oper     = data.get("oper", "")
         instr.type     = data.get("type", "")
+        instr.size     = data.get("size", "")
         instr.text     = data.get("text", "")
         instr.destin   = data.get("destin", "")
         instr.source1  = data.get("source1", "")
@@ -37,6 +41,8 @@ class Instruction:
     def json(self) -> dict:
         return {
             "type":     self.type,
+            "oper":     self.oper,
+            "size":     self.size,
             "text":     self.text,
             "destin":   self.destin,
             "source1":  self.source1,
