@@ -16,7 +16,7 @@ class InstrState(Enum):
     NONE           = " "
 
 class InstrInstance:
-    def __init__(self, dispatch_cycle: int, dynamic_idx: int, static_idx: int, mType: str, addr: int) -> None:
+    def __init__(self, dispatch_cycle: int, dynamic_idx: int, static_idx: int, mType: int, addr: int) -> None:
         self.d_idx    = dynamic_idx
         self.s_idx    = static_idx
         self.state    = InstrState.DISPATCH
@@ -25,7 +25,7 @@ class InstrInstance:
         self.disp_cycle= dispatch_cycle      # clock cycle when instruction is dispatched
         self.exec_cycle= dispatch_cycle      # clock cycle when instruction beggins execution
         self.latency  = 0       # counter of cycles remainining for finishing execution
-        self.memory   = mType
+        self.memory   = mType   # 0 for non-memory instruction, 1 for load, 2 for store
         self.memAddr  = addr
         self.exec_lat = 0       # statistic of total execution latency, including waiting for resources
 
@@ -61,7 +61,7 @@ class Window:
             return None
 
 
-    def push(self, disp_cycle:int, idx: int, instr: int, mType: str, addr: int) -> bool:
+    def push(self, disp_cycle:int, idx: int, instr: int, mType: int, addr: int) -> bool:
         if self.is_full():
             return False
         self.buffer[self.last] = (InstrInstance(disp_cycle, idx, instr, mType, addr))

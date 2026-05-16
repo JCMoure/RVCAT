@@ -12,10 +12,11 @@ class Instruction:
         self.source2  = ""
         self.source3  = ""
         self.constant = ""
-        self.stride   = 0
+        self.stride   = 1
         self.lanes    = 1
         self.latency  = 0
         self.ports    = 0
+        self.addr     = 0    # value initialized when program is loaded
 
     def from_json(data: dict):
         instr = Instruction()
@@ -27,7 +28,8 @@ class Instruction:
         instr.source3  = data.get("source3", "")
         instr.constant = data.get("constant", "")
         instr.lanes    = data.get("lanes", 1)
-        instr.stride   = data.get("stride", 0)
+        instr.stride   = data.get("stride", 1)
+        instr.addr     = data.get("addr", 0)
         instr.latency  = data.get("latency", 0)
         instr.ports    = data.get("ports", 0)
         return instr
@@ -102,6 +104,7 @@ class Program:
         self.constants    = [] # constant values/variable names (only once, program order)
         self.read_only    = [] # list of read-only variable names (only once)
         self.loop_carried = [] # list of tuples of loop-carried variables: (producer_id,var_name)
+        self.arrays       = [] # list of array variable names in program order
 
         self.inst_dependence_list = []  ## list of instruction data dependencies
         self.dependence_edges     = []  ## list of dependence offsets
@@ -117,11 +120,13 @@ class Program:
         self.instruction_list = []
         for instr_dict in instrs:
             self.instruction_list.append(Instruction.from_json(instr_dict))
-        self.n            = len(self.instruction_list)        
+        self.n            = len(self.instruction_list)
+        self.loop_stride  = 1 # by default, loop stride is 1
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)
         self.loop_carried = [] # index to list of variable names which are loop-carried
         self.read_only    = [] # index to list of variable names which are read-only
+        self.arrays       = [] # list of array variable names in program order
 
         self.inst_dependence_list = []  ## list of instruction data dependencies
         # inst_dependence_list = [ i0, i1, i2 ... ]; 
@@ -259,6 +264,54 @@ class Program:
 
         self.inst_cyclic = list(set(Insts))  
         # list of inst_ids in cyclic paths (only once)
+
+        # get list of array variables in program order
+        Arrays = []
+        for inst in self.instruction_list:
+            if inst.type == "MEM" or inst.type == "VMEM":
+              ArrayName = inst.source2
+              Arrays.append  (ArrayName)
+            elif inst.type == "INT":  # if stride is not 1, then it defines the loop counter stride
+              if inst.stride != 1:
+                self.loop_stride= inst.stride
+
+        # List of array variable names (each appears only once)
+        self.arrays = list(set(Arrays))
+        if "" in self.arrays:
+          self.arrays.remove("")
+
+
+    def assign_memory_addresses(self, N: int) -> None:
+        # assign initial memory addresses and byte-stride to load/store instructions, 
+        # for use in memory trace generation
+        # for simplicity, we assign addresses to all array names in program order, starting from 0
+        # accesses to an array determin the arrays size
+        
+        iterations = N // self.loop_stride  # number of loop iterations to execute
+
+        init_addr = 0
+        for arrayName in self.arrays:
+            array_size = 0
+            for inst in self.instruction_list:
+                if inst.type == "MEM" or inst.type == "VMEM":
+                    if (arrayName == inst.source2):
+                        dataSize = 4 if inst.type == "word" else (8 if inst.type == "long" else 1)
+                        inst.byte_stride = dataSize*inst.lanes*inst.stride
+                        if inst.stride < 0: # if stride is negative, then it is a reverse access starting from the end of the array
+                           inst.addr = init_addr + (N-inst.constant)*dataSize
+                           last_addr = inst.addr + (iterations-1)*inst.byte_stride
+                           array_size = max(array_size, inst.addr+dataSize*inst.lanes)
+                        elif inst.stride > 0:  # if stride is positive, then it is a forward access starting from the beginning of the array
+                           inst.addr = init_addr + inst.constant*dataSize
+                           last_addr = inst.addr + (iterations-1)*inst.byte_stride
+                           array_size = max(array_size, last_addr+dataSize*inst.lanes)
+                        else:  # if stride is zero, then it is an offset starting from the beginning of the array
+                           inst.addr = init_addr + inst.constant*dataSize
+                           last_addr = inst.addr + inst.byte_stride
+                           array_size = max(array_size, last_addr+dataSize*inst.lanes)
+
+            init_addr += array_size  # assign next array to the next free address after current array
+            
 
     def generate_dependence_info (self) -> None:
 

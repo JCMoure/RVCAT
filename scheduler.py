@@ -59,14 +59,21 @@ class Scheduler:
             elif instr.state == InstrState.EXECUTE:
                 instr.latency -= 1
                 if instr.latency == 0:
-                     instr.state    = InstrState.WRITE_BACK
-                     instr.substate = InstrState.NONE
+                    if instr.substate == InstrState.NONE and instr.memory:
+                        # Memory instruction: Cache access --> memory=1 --> load, 2 --> store
+                        instr.latency, result, MM_access = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
+                        instr.exec_lat += instr.latency   # add extra latency in case of cache miss
+                    
+                    if instr.latency > 0:
+                        if result == 1:
+                            instr.substate = InstrState.WAIT_CACHE_MISS
+                        else:
+                            instr.substate = InstrState.WAIT_CACHE_2ND
+                    else:
+                        instr.state    = InstrState.WRITE_BACK
+                        instr.substate = InstrState.NONE
 
             elif instr.state == InstrState.DISPATCH:
-
-                # Memory Access
-                # self.cache.access(mType, Addr, cycles)
-
                 if instr.substate in [InstrState.NONE, InstrState.WAIT_DATA]:
                     instr.substate = InstrState.NONE
                   
@@ -139,7 +146,15 @@ class Scheduler:
         dw = self.dispWidth
         while self.dispatched < self.n and dw and not self.window.is_full():
             static_idx = self.pc % self.num_instr
-            self.window.push(self.cycles, self.pc, static_idx, "", 0)
+            instr_mem  = 0
+            addr       = -1
+            instr      = self.program[static_idx]
+            if instr.type == "MEM" or instr.type == "VMEM":
+                instr_mem  = 1 if instr.oper == "LOAD" else 2
+                addr       = instr.addr
+                instr.addr = addr + instr.byte_stride
+    
+            self.window.push(self.cycles, self.pc, static_idx, instr_mem, addr)
             self.pc += 1
             dw      -= 1
             self.dispatched +=1
@@ -282,6 +297,7 @@ class Scheduler:
 
         if self.nBlocks > 0:
             self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+            _program.assign_memory_addresses(self.iterations)
 
         self.num_instr  = _program.n
         self.n          = niters*self.num_instr
@@ -319,17 +335,10 @@ class Scheduler:
             ]
             instructions.append(instr)   # insert new instruction in timeline structure
 
-        # Cycle = 0
-        # MM_usage = "  "
-        # for use_time in MM_timeline:
-        #     if use_time >= self.cycles:
-        #        break
-        #    MM_usage += "  "*(use_time-Cycle-1)+"# "
-        #    Cycle = use_time
-
         timelineJson                 = {}
         timelineJson["cycles"]       = self.cycles
         timelineJson["instructions"] = instructions
+        timelineJson["MM_usage"]     = MM_timeline
 
         return json.dumps(timelineJson)
 
@@ -352,6 +361,7 @@ class Scheduler:
 
         if self.nBlocks > 0:
             self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+            _program.assign_memory_addresses(self.iterations)
 
         self.num_instr  = _program.n
         self.n          = niters*self.num_instr
@@ -402,8 +412,7 @@ class Scheduler:
             self.window.pop(retires)
             self.dispatch()
 
-        critical_path = ex.longest_path(ExecGraph)
-
+        critical_path   = ex.longest_path(ExecGraph)
         cycles_per_iter = self.cycles / self.iterations
         IPC             = self.n      / self.cycles
 
