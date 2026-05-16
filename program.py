@@ -19,23 +19,25 @@ class Instruction:
         self.latency  = 0
         self.ports    = 0
         self.addr     = 0    # value initialized when program is loaded
+        self.byte_stride = 4 # value initialized when program is loaded
 
     def from_json(data: dict):
         instr = Instruction()
-        instr.oper     = data.get("oper", "")
-        instr.type     = data.get("type", "")
-        instr.size     = data.get("size", "")
-        instr.text     = data.get("text", "")
-        instr.destin   = data.get("destin", "")
-        instr.source1  = data.get("source1", "")
-        instr.source2  = data.get("source2", "")
-        instr.source3  = data.get("source3", "")
-        instr.constant = data.get("constant", "")
-        instr.lanes    = data.get("lanes", 1)
-        instr.stride   = data.get("stride", 1)
-        instr.addr     = data.get("addr", 0)
-        instr.latency  = data.get("latency", 0)
-        instr.ports    = data.get("ports", 0)
+        instr.oper       = data.get("oper", "")
+        instr.type       = data.get("type", "")
+        instr.size       = data.get("size", "")
+        instr.text       = data.get("text", "")
+        instr.destin     = data.get("destin", "")
+        instr.source1    = data.get("source1", "")
+        instr.source2    = data.get("source2", "")
+        instr.source3    = data.get("source3", "")
+        instr.constant   = data.get("constant", "")
+        instr.lanes      = data.get("lanes", 1)
+        instr.stride     = data.get("stride", 1)
+        instr.addr       = data.get("addr", 0)
+        instr.byte_stride= data.get("byte_stride", 4)
+        instr.latency    = data.get("latency", 0)
+        instr.ports      = data.get("ports", 0)
         return instr
 
     def json(self) -> dict:
@@ -286,7 +288,6 @@ class Program:
         if "" in self.arrays:
           self.arrays.remove("")
 
-
     def assign_memory_addresses(self, N: int) -> None:
         # assign initial memory addresses and byte-stride to load/store instructions, 
         # for use in memory trace generation
@@ -318,7 +319,6 @@ class Program:
 
             init_addr += array_size  # assign next array to the next free address after current array
             
-
     def generate_dependence_info (self) -> None:
 
         # Used by execution scheduler to control data dependencies during execution
