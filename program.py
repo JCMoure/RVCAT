@@ -12,6 +12,8 @@ class Instruction:
         self.source2  = ""
         self.source3  = ""
         self.constant = ""
+        self.stride   = 0
+        self.lanes    = 1
         self.latency  = 0
         self.ports    = 0
 
@@ -24,6 +26,8 @@ class Instruction:
         instr.source2  = data.get("source2", "")
         instr.source3  = data.get("source3", "")
         instr.constant = data.get("constant", "")
+        instr.lanes    = data.get("lanes", 1)
+        instr.stride   = data.get("stride", 0)
         instr.latency  = data.get("latency", 0)
         instr.ports    = data.get("ports", 0)
         return instr
@@ -37,6 +41,8 @@ class Instruction:
             "source2":  self.source2,
             "source3":  self.source3,
             "constant": self.constant,
+            "lanes":    self.lanes,
+            "stride":   self.stride,
             "latency":  self.latency,
             "ports":    self.ports
         }
@@ -316,7 +322,7 @@ class Program:
 
         self.cyclic_paths = []
         for path in cyc_paths:
-            path = path[:-1]      # remove last element (repeated as the first one)
+            path = path[:-1]                 # remove last element (repeated as the first one)
             min_val   = min(path)            # find minimum value
             min_index = path.index(min_val)  # find position of minimum value
             path = path[min_index:]+path[:min_index+1]
@@ -456,14 +462,13 @@ class Program:
                if cyclic:
                    out += f"[label=<<B>{var}"
                    if show_latency:
-                        path = 0
-                        while inst_id not in recurrent_paths[path]:
-                            path = path+1
-                        (lat,iters) = path_latencies[path]
-                        if iters==1:
-                            out += f" : <FONT COLOR=\"blue\">{lat} cycles/iter</FONT>"
-                        else:
-                            out += f" : <FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT>"
+                      # Find all paths containing inst_id and get their ratios, then take the max
+                      paths_with_inst = [(p, path_latencies[p]) for p in range(len(recurrent_paths)) if inst_id in recurrent_paths[p]]
+                      (lat, iters) = max(paths_with_inst, key=lambda x: x[1][0] / x[1][1] if x[1][1] != 0 else float('inf'))[1]
+                      if iters==1:
+                        out += f" : <FONT COLOR=\"blue\">{lat} cycles/iter</FONT>"
+                      else:
+                        out += f" : <FONT COLOR=\"blue\">{lat}/{iters}= {lat/iters} cycles/iter</FONT>"
                    out += f"</B>>, tooltip=\"cyclic path\"];\n"
                else:
                    out += f"[label=<<B>{var}</B>>, tooltip=\"not cyclic\", fontcolor=blue];\n"
