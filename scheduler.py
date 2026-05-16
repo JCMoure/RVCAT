@@ -59,7 +59,7 @@ class Scheduler:
             elif instr.state == InstrState.EXECUTE:
                 instr.latency -= 1
                 if instr.latency == 0:
-                    if instr.substate == InstrState.NONE and instr.memory:
+                    if instr.substate == InstrState.NONE and instr.memory and self.cache != None:
                         # Memory instruction: Cache access --> memory=1 --> load, 2 --> store
                         instr.latency, result, MM_access = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
                         instr.exec_lat += instr.latency   # add extra latency in case of cache miss
@@ -150,7 +150,8 @@ class Scheduler:
             addr       = -1
             instr      = _program[static_idx]
             if instr.type == "MEM" or instr.type == "VMEM":
-                instr_mem  = 1 if instr.oper == "LOAD" else 2
+                if self.cache != None:
+                  instr_mem  = 1 if instr.oper == "LOAD" else 2
                 addr       = instr.addr
                 instr.addr = addr + instr.byte_stride
     
