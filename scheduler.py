@@ -59,10 +59,12 @@ class Scheduler:
             elif instr.state == InstrState.EXECUTE:
                 instr.latency -= 1
                 if instr.latency == 0:
-                    if instr.substate == InstrState.NONE and instr.memory and self.cache != None:
-                        # Memory instruction: Cache access --> memory=1 --> load, 2 --> store
-                        instr.latency, result, MM_access = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
-                        instr.exec_lat += instr.latency   # add extra latency in case of cache miss
+                    if (instr.substate == InstrState.NONE and 
+                        instr.memory > 0 and 
+                        self.cache is not None):
+                            # Memory instruction: Cache access --> memory=1 --> load, 2 --> store
+                            instr.latency, result, MM_access = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
+                            instr.exec_lat += instr.latency   # add extra latency in case of cache miss
                     
                     if instr.latency > 0:
                         if result == 1:
