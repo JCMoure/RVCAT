@@ -335,8 +335,8 @@ class Scheduler:
                 cycles[0][0]-1,        # starting cycle
                 INSTR_Info[i][1],      # port
                 stages,                # states
-                criticalList           # critical states
-                INSTR_Info[i][2],      # memory address
+                criticalList,          # critical states
+                INSTR_Info[i][2]       # memory address
             ]
             instructions.append(instr)   # insert new instruction in timeline structure
 
