@@ -336,6 +336,7 @@ class Scheduler:
                 INSTR_Info[i][1],      # port
                 stages,                # states
                 criticalList           # critical states
+                INSTR_Info[i][2],      # memory address
             ]
             instructions.append(instr)   # insert new instruction in timeline structure
 
@@ -432,7 +433,7 @@ class Scheduler:
            usage = port_usage[port]/self.cycles
            out["ports"][str(port)] = usage*100
 
-        if self.cache != None:
+        if self.cache is not None:
             MM_usage, MM_Rd_usage, RdMisses, WrMisses = self.cache.statistics(self.cycles)
         else:
             MM_usage, MM_Rd_usage, RdMisses, WrMisses = 0, 0, 0, 0
