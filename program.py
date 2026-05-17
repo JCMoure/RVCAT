@@ -135,6 +135,7 @@ class Program:
         self.loop_carried = [] # index to list of variable names which are loop-carried
         self.read_only    = [] # index to list of variable names which are read-only
         self.arrays       = [] # list of array variable names in program order
+        self.array_addrs  = [] # list of initial memory addresses for arrays in program order
 
         self.inst_dependence_list = []  ## list of instruction data dependencies
         # inst_dependence_list = [ i0, i1, i2 ... ]; 
@@ -279,14 +280,13 @@ class Program:
             if inst.type == "MEM" or inst.type == "VMEM":
               ArrayName = inst.source2
               Arrays.append  (ArrayName)
-            elif inst.type == "INT":  # if stride is not 1, then it defines the loop counter stride
+            elif inst.type == "BRANCH":  # if stride is not 1, then it defines the loop counter stride
               if inst.stride != 1:
                 self.loop_stride= inst.stride
 
-        # List of array variable names (each appears only once)
-        self.arrays = list(set(Arrays))
-        if "" in self.arrays:
-          self.arrays.remove("")
+        # Eliminar duplicados preservando orden y filtrar strings vacíos en un solo paso
+        self.arrays = list(dict.fromkeys(filter(None, Arrays)))
+        self.array_addrs = [0] * len(self.arrays)
 
     def assign_memory_addresses(self, N: int) -> None:
         # assign initial memory addresses and byte-stride to load/store instructions, 
@@ -296,9 +296,11 @@ class Program:
         
         iterations = N // self.loop_stride  # number of loop iterations to execute
 
+        self.array_addrs = []
         init_addr = 0
         for arrayName in self.arrays:
             array_size = 0
+            dataSize = 0
             for inst in self.instruction_list:
                 if inst.type == "MEM" or inst.type == "VMEM":
                     if (arrayName == inst.source2):
@@ -308,16 +310,17 @@ class Program:
                         if inst.stride < 0: # if stride is negative, then it is a reverse access starting from the end of the array
                            inst.addr = init_addr + (N-const)*dataSize
                            last_addr = inst.addr + (iterations-1)*inst.byte_stride
-                           array_size = max(array_size, inst.addr+dataSize*inst.lanes)
+                           array_size = max(array_size, inst.addr+dataSize*inst.lanes-init_addr)
                         elif inst.stride > 0:  # if stride is positive, then it is a forward access starting from the beginning of the array
                            inst.addr = init_addr + const*dataSize
                            last_addr = inst.addr + (iterations-1)*inst.byte_stride
-                           array_size = max(array_size, last_addr+dataSize*inst.lanes)
+                           array_size = max(array_size, last_addr+dataSize*inst.lanes-init_addr)
                         else:  # if stride is zero, then it is an offset starting from the beginning of the array
                            inst.addr = init_addr + const*dataSize
                            last_addr = inst.addr + inst.byte_stride
-                           array_size = max(array_size, last_addr+dataSize*inst.lanes)
+                           array_size = max(array_size, last_addr+dataSize*inst.lanes-init_addr)
 
+            self.array_addrs.append([init_addr, dataSize, array_size])
             init_addr += array_size  # assign next array to the next free address after current array
             
     def generate_dependence_info (self) -> None:
