@@ -434,14 +434,16 @@ class Scheduler:
            out["ports"][str(port)] = usage*100
 
         if self.cache is not None:
-            MM_usage, MM_Rd_usage, RdMisses, WrMisses = self.cache.statistics(self.cycles)
+            MM_reads, MM_writes, Reads, RdMisses, Writes, WrMisses = self.cache.statistics(self.cycles)
         else:
-            MM_usage, MM_Rd_usage, RdMisses, WrMisses = 0, 0, 0, 0
+            MM_reads, MM_writes, Reads, RdMisses, Writes, WrMisses = 0, 0, 0, 0, 0, 0
 
-        out["MM_usage"]       = MM_usage
-        out["MM_read_usage"]  = MM_Rd_usage
-        out["read_misses"]    = RdMisses
+        out["reads"]          = Reads
+        out["writes"]         = Writes
         out["write_misses"]   = WrMisses
+        out["read_misses"]    = RdMisses
+        out["MM_Reads"]       = MM_reads
+        out["MM_Writes"]      = MM_writes
 
         out["critical_path"]   = ex.critical_path_statistics_json(self.num_instr, _program.instruction_list, critical_path)
         return json.dumps(out)

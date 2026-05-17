@@ -114,22 +114,8 @@ class Cache:
     self.updateLRU(pos)  
     return latency, result, MM_access
 
-
   def statistics(self, cycles):
-      MM_Reads        = self.ReadMemoryCount
-      MM_transactions = MM_Reads + self.WriteMemoryCount
-      MM_trans_time   = MM_transactions * self.MEM_issue_time
-      if MM_trans_time > cycles:
-          # this is due to actions happening after timeline window
-          MM_transactions = cycles // self.MEM_issue_time
-          if MM_Reads > MM_transactions:
-              MM_Reads = MM_transactions
-
-      MM_trans_time   = MM_transactions * self.MEM_issue_time
-      MM_read_time    = MM_Reads * self.MEM_issue_time
-
-      return MM_trans_time/cycles, MM_read_time/cycles, self.CacheRdMisses, self.CacheWrMisses
-
+      return self.ReadMemoryCount, self.WriteMemoryCount, self.CacheReads, self.CacheRdMisses, self.CacheWrites, self.CacheWrMisses
 
   def state(self):
     print("*********************************************************************")
