@@ -302,7 +302,9 @@ class Scheduler:
         
         if self.nBlocks > 0:
             self.cache  = Cache(self.nBlocks, self.blksize, self.mPenalty, self.mIssueTime)
-
+        else:
+            self.cache = None
+            
         self.num_instr  = _program.n
         self.n          = niters*self.num_instr
         self.pc         = 0
@@ -368,6 +370,8 @@ class Scheduler:
         
         if self.nBlocks > 0:
             self.cache  = Cache(self.nBlocks, self.blksize, self.mPenalty, self.mIssueTime)
+        else:
+            self.cache = None
 
         self.num_instr  = _program.n
         self.n          = niters*self.num_instr
