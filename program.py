@@ -303,7 +303,7 @@ class Program:
                 if inst.type == "MEM" or inst.type == "VMEM":
                     if (arrayName == inst.source2):
                         const = 0 if inst.constant == "" else int(inst.constant)
-                        dataSize = 4 if inst.type == "word" else (8 if inst.type == "long" else 1)
+                        dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
                         inst.byte_stride = dataSize*inst.lanes*inst.stride
                         if inst.stride < 0: # if stride is negative, then it is a reverse access starting from the end of the array
                            inst.addr = init_addr + (N-const)*dataSize
