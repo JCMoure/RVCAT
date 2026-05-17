@@ -56,24 +56,30 @@ class Scheduler:
                 else:
                     instr.substate = InstrState.WAIT_RETIRE
 
-            elif instr.state == InstrState.EXECUTE:
+            elif instr.state == InstrState.LOAD or instr.state == InstrState.STORE:
                 instr.latency -= 1
                 if instr.latency == 0:
-                    if (instr.substate == InstrState.NONE and 
-                        instr.memory > 0 and 
-                        self.cache is not None):
-                            # Memory instruction: Cache access --> memory=1 --> load, 2 --> store
-                            instr.latency, result, MM_access = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
-                            instr.exec_lat += instr.latency   # add extra latency in case of cache miss
-                    
+                    if (instr.substate == InstrState.NONE and self.cache is not None):
+                        # Memory instruction: Cache access --> memory=1 --> load, 2 --> store
+                        instr.latency, result, MM_access = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
+                        instr.exec_lat += instr.latency   # add extra latency in case of cache miss
                     if instr.latency > 0:
                         if result == 1:
-                            instr.substate = InstrState.WAIT_CACHE_MISS
+                            if MM_access == self.cycles:
+                                instr.substate = InstrState.MM_READ
+                            else:
+                                instr.substate = InstrState.WAIT_CACHE_MISS
                         else:
                             instr.substate = InstrState.WAIT_CACHE_2ND
                     else:
                         instr.state    = InstrState.WRITE_BACK
                         instr.substate = InstrState.NONE
+
+            elif instr.state == InstrState.EXECUTE:
+                instr.latency -= 1
+                if instr.latency == 0:
+                    instr.state    = InstrState.WRITE_BACK
+                    instr.substate = InstrState.NONE
 
             elif instr.state == InstrState.DISPATCH:
                 if instr.substate in [InstrState.NONE, InstrState.WAIT_DATA]:
@@ -100,7 +106,10 @@ class Scheduler:
                                 instr.exec_cycle = self.cycles
                                 instr.latency    = latency
                                 instr.exec_lat  += latency
-                                instr.state      = InstrState.EXECUTE
+                                if instr.memory > 0:
+                                    instr.state = InstrState.LOAD if instr.memory == 1 else InstrState.STORE
+                                else:
+                                    instr.state = InstrState.EXECUTE
                                 instr.substate   = InstrState.NONE
                                 instr.port_used  = port
                                 xw -= 1
@@ -127,16 +136,19 @@ class Scheduler:
               instr.substate = InstrState.NONE
               if xw:
                   if w_idx in issd_isps:
-                      port             = issd_isps[w_idx]
-                      instr.port_used  = port
-                      used_ports[port] = True
-                      instr.exec_cycle = self.cycles
-                      instr.state      = InstrState.EXECUTE
-                      instr.exec_lat  += instr.latency
-                      xw -= 1
+                    port             = issd_isps[w_idx]
+                    instr.port_used  = port
+                    used_ports[port] = True
+                    instr.exec_cycle = self.cycles
+                    if instr.memory > 0:
+                        instr.state = InstrState.LOAD if instr.memory == 1 else InstrState.STORE
+                    else:
+                        instr.state = InstrState.EXECUTE                      
+                    instr.exec_lat  += instr.latency
+                    xw -= 1
                   else:
-                      instr.substate  = InstrState.WAIT_RESOURCE
-                      instr.exec_lat += 1
+                    instr.substate  = InstrState.WAIT_RESOURCE
+                    instr.exec_lat += 1
               else:
                   instr.substate  = InstrState.WAIT_BANDWIDTH
                   instr.exec_lat += 1

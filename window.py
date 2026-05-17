@@ -4,6 +4,10 @@ from enum    import Enum
 class InstrState(Enum):
     DISPATCH       = "D"
     EXECUTE        = "E"
+    LOAD           = "L"
+    STORE          = "S"
+    MM_READ        = "#"
+    MM_STORE       = "$"
     WRITE_BACK     = "W"
     RETIRE         = "R"
     WAIT_RESOURCE  = "*"
