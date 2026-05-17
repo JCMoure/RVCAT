@@ -358,6 +358,7 @@ class Scheduler:
         timelineJson["cycles"]       = self.cycles
         timelineJson["instructions"] = instructions
         timelineJson["MM_usage"]     = MM_timeline
+        timelineJson["arrays"]       = _program.arrays
 
         return json.dumps(timelineJson)
 
