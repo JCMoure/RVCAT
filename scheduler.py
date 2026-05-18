@@ -59,21 +59,46 @@ class Scheduler:
             elif instr.state == InstrState.LOAD or instr.state == InstrState.STORE:
                 instr.latency -= 1
                 if instr.latency == 0:
-                    if (instr.substate == InstrState.NONE and self.cache is not None):
-                        # Memory instruction: Cache access --> memory=1 --> load, 2 --> store
-                        instr.latency, result, MM_access = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
-                        instr.exec_lat += instr.latency   # add extra latency in case of cache miss
-                    if instr.latency > 0:
-                        if result == 1:
-                            if MM_access == self.cycles:
-                                instr.substate = InstrState.MM_READ
-                            else:
-                                instr.substate = InstrState.WAIT_CACHE_MISS
-                        else:
-                            instr.substate = InstrState.WAIT_CACHE_2ND
-                    else:
+                    if instr.substate == InstrState.WAIT_DATA_READY or instr.substate == InstrState.WAIT_CACHE_2ND or self.cache is None:
                         instr.state    = InstrState.WRITE_BACK
                         instr.substate = InstrState.NONE
+                    elif instr.substate == InstrState.MM_UPDATE:
+                        instr.substate = InstrState.WAIT_DATA_READY
+                        instr.latency = self.mPenalty - self.mIssueTime - 1
+                        instr.exec_lat += self.mPenalty                    
+                    elif instr.substate == InstrState.WAIT_MM_READY:
+                        instr.substate = InstrState.WAIT_DATA_READY
+                        instr.latency = self.mPenalty - self.mIssueTime
+                        instr.exec_lat += self.mPenalty
+                    elif instr.substate == InstrState.WAIT_MM_RDY_UPDT:
+                        instr.substate = InstrState.MM_UPDATE
+                        instr.latency = 1
+                    elif instr.substate == InstrState.WAIT_MM_REQUEST:
+                        instr.substate = InstrState.WAIT_MM_READY
+                        instr.latency = self.mIssueTime
+                    elif instr.substate == InstrState.WAIT_MM_REQ_UPDT:
+                        instr.substate = InstrState.WAIT_MM_RDY_UPDT
+                        instr.latency = self.mIssueTime
+                    else:
+                        result, instr.latency = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
+                        instr.exec_lat += instr.latency   # add extra latency in case of cache miss
+                        if result == 0:  # HIT
+                            instr.state    = InstrState.WRITE_BACK
+                            instr.substate = InstrState.NONE
+                        elif result == 1:  # Primary miss
+                            if instr.latency > 0:
+                                instr.substate = InstrState.WAIT_MM_REQUEST
+                            else:
+                                instr.substate = InstrState.WAIT_MM_READY
+                                instr.latency = self.mIssueTime
+                        elif result == 3:  # Primary miss with MM update of dirty block
+                            if instr.latency > 0:
+                                instr.substate = InstrState.WAIT_MM_REQ_UPDT
+                            else:
+                                instr.substate = InstrState.WAIT_MM_RDY_UPDT
+                                instr.latency = self.mIssueTime
+                        else:  # Secondary miss
+                            instr.substate = InstrState.WAIT_CACHE_2ND
 
             elif instr.state == InstrState.EXECUTE:
                 instr.latency -= 1
@@ -154,7 +179,7 @@ class Scheduler:
                   instr.exec_lat += 1
 
         retires = self.retrWidth - rw
-        return retires, used_ports, MM_access
+        return retires, used_ports
 
     def dispatch(self):
         dw = self.dispWidth
@@ -164,7 +189,7 @@ class Scheduler:
             addr       = -1
             instr      = _program[static_idx]
             if instr.type == "MEM" or instr.type == "VMEM":
-                if self.cache != None:
+                if self.cache is not None:
                   instr_mem  = 1 if instr.oper == "LOAD" else 2
                 addr       = instr.addr
                 instr.addr = addr + instr.byte_stride
@@ -249,9 +274,9 @@ class Scheduler:
         ExecGraph     = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
         while retired < self.n:
-            retires, used_ports, MM_access = self.next_cycle()
+            retires, used_ports = self.next_cycle()
 
-            if MM_access >= 0:
+            if instruction is LOAD/STORE and misses:
                 MM_timeline.append(MM_access+1)
 
             for port, used in used_ports.items():
@@ -312,6 +337,7 @@ class Scheduler:
 
         _program.assign_memory_addresses(self.iterations)
         
+        # Always creat a new cache object to reset cache state, even if nBlocks is 0 (no cache)
         if self.nBlocks > 0:
             self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
         else:
@@ -456,9 +482,9 @@ class Scheduler:
             MM_reads, MM_writes, Reads, RdMisses, Writes, WrMisses = 0, 0, 0, 0, 0, 0
 
         out["reads"]          = Reads
+        out["read_misses"]    = RdMisses
         out["writes"]         = Writes
         out["write_misses"]   = WrMisses
-        out["read_misses"]    = RdMisses
         out["MM_Reads"]       = MM_reads
         out["MM_Writes"]      = MM_writes
 

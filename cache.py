@@ -19,13 +19,6 @@ class Cache:
     self.reset()
 
   def reset(self):
-    self.ReadMemoryCount = 0
-    self.WriteMemoryCount= 0
-    self.CacheReads      = 0
-    self.CacheRdMisses   = 0
-    self.CacheWrites     = 0
-    self.CacheWrMisses   = 0
-
     self.MEM_last_access = - self.MEM_issue_time
 
     # Initialize cache with LRU list: any random order would suffice
@@ -33,14 +26,12 @@ class Cache:
       self.LRU[i]     = i
       self.VALID[i]   = 0
 
-
   # returns position in cache where block resides, or -1 otherwise
   def search(self, block):
     for i in range(self.CACHE_SIZE):
       if self.VALID[i]==1 and self.TAGS[i]==block:
         return i
     return -1
-
 
   # updates the LRU list setting cache position pos at the end
   def updateLRU(self, block):
@@ -50,7 +41,6 @@ class Cache:
         self.LRU[i] = self.LRU[i]-1      # Decrease LRU priority
     self.LRU[block] = self.CACHE_SIZE-1  # Set maximum priority
 
-
   # get line with LRU=0
   def getLRU(self):
     for i in range(self.CACHE_SIZE):
@@ -58,68 +48,42 @@ class Cache:
         return i
     return 0  ## Error: should not happen (but not checked at runtime)
 
-
-  def access(self, access_type, address, current_cycle):  # returns latency
+  def access(self, access_type, address, current_cycle):  
+    # returns result (0: hit, 1: primary miss, 2: secondary miss, 3: primary miss with MM update of dirty block),
+    #         latency (hit: 0, primary miss: latency_to_MM_request_sent, secondary miss: latency_to_WB),
 
     block   = address // self.BLOCK_SIZE
     pos     = self.search(block)
-    latency = 0
-    result  = 0  #HIT
-    MM_access = -1
+    result  = 0  # HIT by default
+    latency = 0  # HIT latency by default
       
-    if (access_type == 0):
-      self.CacheReads  += 1
-    else:
-      self.CacheWrites += 1
-
     if (pos >= 0): 
       if self.DATA[pos] > current_cycle:  # SECONDARY MISS
         result  = 2  # CACHE_2ND
         latency = self.DATA[pos] + 1 - current_cycle
-        self.DATA[pos] += 1               # one secondary miss to same cache line per cycle
+        self.DATA[pos] += 1     # one secondary miss to same cache line per cycle
+      # else: HIT, no latency
 
-      else:                               # HIT 
-        latency = 0
-
-    else:           # PRIMARY MISS
+    else:  # PRIMARY MISS
       result = 1 # CACHE_MISS
-      if (access_type == 0):
-        self.CacheRdMisses += 1
-      else:
-        self.CacheWrMisses += 1
-
 
       pos = self.getLRU()
-
       # compute traffic to Main Memory
       self.MEM_last_access += self.MEM_issue_time
 
       if current_cycle > self.MEM_last_access:
         self.MEM_last_access = current_cycle
 
-      latency = self.MEM_last_access - current_cycle + self.MEM_latency
+      latency = self.MEM_last_access - current_cycle ## self.MEM_latency will be added by scheduler
 
-      if (self.MODIFIED[pos] == 1):
-        self.WriteMemoryCount += 1                    # Copy data block in Cache to Memory
+      if (self.MODIFIED[pos] == 1):   # Need to update dirty data block in Cache to Memory
         self.MEM_last_access  += self.MEM_issue_time  # consume MEM bandwidth
-       
-      self.ReadMemoryCount += 1      # Copy data block from Memory to Cache
-
+        result = 3  # CACHE_MISS_WB
+  
       self.TAGS[pos]  = block    # store tag for stored block
       self.VALID[pos] = 1        # cache line is valid
-      self.DATA[pos]  = current_cycle + latency
-      MM_access       = self.MEM_last_access
+      self.DATA[pos]  = current_cycle + latency + self.MEM_latency  # time when data will be ready in cache
 
     self.MODIFIED[pos] = access_type
     self.updateLRU(pos)  
-    return latency, result, MM_access
-
-  def statistics(self, cycles):
-      return self.ReadMemoryCount, self.WriteMemoryCount, self.CacheReads, self.CacheRdMisses, self.CacheWrites, self.CacheWrMisses
-
-  def state(self):
-    print("*********************************************************************")
-    print("**               Block Size= ", self.BLOCK_SIZE, "          **")
-    for i in range(self.CACHE_SIZE):
-      print("* Line", i, "VALID=", self.VALID[i], "LRU=", self.LRU[i], "MODIF=", self.MODIFIED[i], "TAG=", self.TAGS[i], "  **")
-    print("*********************************************************************")
+    return result, latency
