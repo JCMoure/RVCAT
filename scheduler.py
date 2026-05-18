@@ -37,7 +37,10 @@ class Scheduler:
 
         issue_queue = {}
         used_ports  = {port:False for port in range(32) if (self.port_mask >> port) & 1}
-        MM_access   = -1
+        ReadMisses  = []
+        SecondMisses= []
+        WriteMisses = []
+        MMupdates   = []
 
         for window_idx in range(self.window.count):
 
@@ -86,18 +89,28 @@ class Scheduler:
                             instr.state    = InstrState.WRITE_BACK
                             instr.substate = InstrState.NONE
                         elif result == 1:  # Primary miss
+                            if instr.memory == 1:
+                                ReadMisses.append(instr.d_idx)
+                            else:                       
+                                WriteMisses.append(instr.d_idx)
                             if instr.latency > 0:
                                 instr.substate = InstrState.WAIT_MM_REQUEST
                             else:
                                 instr.substate = InstrState.WAIT_MM_READY
                                 instr.latency = self.mIssueTime
                         elif result == 3:  # Primary miss with MM update of dirty block
+                            if instr.memory == 1:
+                                ReadMisses.append(instr.d_idx)
+                            else:                       
+                                WriteMisses.append(instr.d_idx)
+                            MMupdates.append(instr.d_idx)
                             if instr.latency > 0:
                                 instr.substate = InstrState.WAIT_MM_REQ_UPDT
                             else:
                                 instr.substate = InstrState.WAIT_MM_RDY_UPDT
                                 instr.latency = self.mIssueTime
                         else:  # Secondary miss
+                            SecondMisses.append(instr.d_idx)
                             instr.substate = InstrState.WAIT_CACHE_2ND
 
             elif instr.state == InstrState.EXECUTE:
@@ -179,7 +192,7 @@ class Scheduler:
                   instr.exec_lat += 1
 
         retires = self.retrWidth - rw
-        return retires, used_ports
+        return retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates
 
     def dispatch(self):
         dw = self.dispWidth
@@ -268,7 +281,6 @@ class Scheduler:
 
         timeline      = {i:[] for i in range(self.n + self.window.size + rw)}
         port_timeline = {port:[] for port in ports}
-        MM_timeline   = []
         INSTR_Info    = []
 
         ExecGraph     = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
@@ -276,14 +288,10 @@ class Scheduler:
         while retired < self.n:
             retires, used_ports = self.next_cycle()
 
-            if instruction is LOAD/STORE and misses:
-                MM_timeline.append(MM_access+1)
-
             for port, used in used_ports.items():
                 port_timeline[port].append(used)
 
             for i in range(retires):
-
                 r_instr     = self.window[i]
                 dynamic_idx = r_instr.d_idx
                 if dynamic_idx != retired:
@@ -316,7 +324,7 @@ class Scheduler:
 
         critical_path = ex.longest_path(ExecGraph)
 
-        return timeline, port_timeline, MM_timeline, INSTR_Info, critical_path
+        return timeline, port_timeline, INSTR_Info, critical_path
 
     def get_timeline(self, processJSON, niters: int = 3) -> str:
 
@@ -358,7 +366,7 @@ class Scheduler:
         ports        = [i for i in range(32) if (all_ports >> i) & 1]
         self.n_ports = len(ports)
 
-        timeline, _, MM_timeline, INSTR_Info, critical_path = self.generate_timeline(ports) 
+        timeline, _, INSTR_Info, critical_path = self.generate_timeline(ports) 
 
         instructions = []    # List of timeline.instructions
 
@@ -383,7 +391,6 @@ class Scheduler:
         timelineJson                 = {}
         timelineJson["cycles"]       = self.cycles
         timelineJson["instructions"] = instructions
-        timelineJson["MM_usage"]     = MM_timeline
         timelineJson["arrays"]       = _program.arrays
 
         return json.dumps(timelineJson)
@@ -421,6 +428,7 @@ class Scheduler:
         retired         = 0
         last_ret_cycle  = 0
         last_disp_cycle = 0
+        MM_writes, Reads, RdMisses, Writes, WrMisses, SecondMisses = 0, 0, 0, 0, 0, 0, 0
 
         all_ports = 0
         for instr in _program.instruction_list:
@@ -435,7 +443,23 @@ class Scheduler:
         ExecGraph  = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
         while retired < self.n:
-            retires, used_ports, _ = self.next_cycle()
+            retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates = self.next_cycle()
+
+            for idx in ReadMisses:
+                if idx < self.n:
+                    RdMisses += 1
+
+            for idx in WriteMisses:
+                if idx < self.n:
+                    WrMisses += 1
+
+            for idx in MMupdates:
+                if idx < self.n:
+                    MM_writes += 1
+
+            for idx in SecondMisses:
+                if idx < self.n:
+                    SecondMisses += 1
 
             for port in ports:
                 if used_ports[port]:
@@ -453,6 +477,12 @@ class Scheduler:
                 last_ret_cycle  = self.cycles
                 exec_latency    = r_instr.exec_lat
                 ex.exec_graph_update ( ExecGraph, dynamic_idx, disp_latency, exec_latency, ret_latency )
+
+                if r_instr.memory != 0:  # LOAD or STORE
+                    if r_instr.memory == 1:  # LOAD
+                        Reads += 1
+                    elif r_instr.memory == 2:  # STORE
+                        Writes += 1
 
                 retired += 1
                 if retired >= self.n:
@@ -476,16 +506,12 @@ class Scheduler:
            usage = port_usage[port]/self.cycles
            out["ports"][str(port)] = usage*100
 
-        if self.cache is not None:
-            MM_reads, MM_writes, Reads, RdMisses, Writes, WrMisses = self.cache.statistics(self.cycles)
-        else:
-            MM_reads, MM_writes, Reads, RdMisses, Writes, WrMisses = 0, 0, 0, 0, 0, 0
-
         out["reads"]          = Reads
         out["read_misses"]    = RdMisses
         out["writes"]         = Writes
         out["write_misses"]   = WrMisses
-        out["MM_Reads"]       = MM_reads
+        out["second_misses"]  = SecondMisses
+        out["MM_Reads"]       = RdMisses+WrMisses
         out["MM_Writes"]      = MM_writes
 
         out["critical_path"]   = ex.critical_path_statistics_json(self.num_instr, _program.instruction_list, critical_path)
