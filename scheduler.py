@@ -428,7 +428,7 @@ class Scheduler:
         retired         = 0
         last_ret_cycle  = 0
         last_disp_cycle = 0
-        MM_writes, Reads, RdMisses, Writes, WrMisses, SecondMisses = 0, 0, 0, 0, 0, 0
+        MM_writes, Reads, RdMisses, Writes, WrMisses, S2Misses = 0, 0, 0, 0, 0, 0
 
         all_ports = 0
         for instr in _program.instruction_list:
@@ -459,7 +459,7 @@ class Scheduler:
 
             for idx in SecondMisses:
                 if idx < self.n:
-                    SecondMisses += 1
+                    S2Misses += 1
 
             for port in ports:
                 if used_ports[port]:
@@ -510,7 +510,7 @@ class Scheduler:
         out["read_misses"]    = RdMisses
         out["writes"]         = Writes
         out["write_misses"]   = WrMisses
-        out["second_misses"]  = SecondMisses
+        out["second_misses"]  = S2Misses
         out["MM_Reads"]       = RdMisses+WrMisses
         out["MM_Writes"]      = MM_writes
 
