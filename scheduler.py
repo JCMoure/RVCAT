@@ -428,7 +428,7 @@ class Scheduler:
         retired         = 0
         last_ret_cycle  = 0
         last_disp_cycle = 0
-        MM_writes, Reads, RdMisses, Writes, WrMisses, SecondMisses = 0, 0, 0, 0, 0, 0, 0
+        MM_writes, Reads, RdMisses, Writes, WrMisses, SecondMisses = 0, 0, 0, 0, 0, 0
 
         all_ports = 0
         for instr in _program.instruction_list:
