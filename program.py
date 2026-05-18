@@ -68,7 +68,7 @@ class Process:
         self.mPenalty   = 1
         self.mIssueTime = 1
         self.sched      = "greedy"
-        self.blksize    = 16
+        self.blkSize    = 16
         self.nBlocks    = 0
 
     def from_json(data: dict):
@@ -81,7 +81,7 @@ class Process:
         process.mPenalty         = data.get("mPenalty", 1) 
         process.mIssueTime       = data.get("mIssueTime", 1)
         process.sched            = data.get("sched", "greedy")
-        process.blksize          = data.get("blksize", 16)
+        process.blkSize          = data.get("blkSize", 16)
         process.nBlocks          = data.get("nBlocks", 0)
         return process
 
@@ -95,7 +95,7 @@ class Process:
             "mPenalty":         self.mPenalty,
             "mIssueTime":       self.mIssueTime,
             "sched":            self.sched,
-            "blksize":          self.blksize,
+            "blkSize":          self.blkSize,
             "nBlocks":          self.nBlocks
         }
 

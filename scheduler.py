@@ -14,7 +14,7 @@ class Scheduler:
         self.dispWidth  = 1
         self.retrWidth  = 1
         self.sched      = "optimal"
-        self.blksize    = 1
+        self.blkSize    = 1
         self.nBlocks    = 1
         self.mPenalty   = 0
         self.mIssueTime = 0
@@ -307,13 +307,13 @@ class Scheduler:
         self.mPenalty   = process.mPenalty
         self.mIssueTime = process.mIssueTime
         self.sched      = process.sched
-        self.blksize    = process.blksize
+        self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
 
         _program.assign_memory_addresses(self.iterations)
         
         if self.nBlocks > 0:
-            self.cache  = Cache(self.nBlocks, self.blksize, self.mPenalty, self.mIssueTime)
+            self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
         else:
             self.cache = None
             
@@ -376,13 +376,13 @@ class Scheduler:
         self.mPenalty   = process.mPenalty
         self.mIssueTime = process.mIssueTime
         self.sched      = process.sched
-        self.blksize    = process.blksize
+        self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
 
         _program.assign_memory_addresses(self.iterations)
         
         if self.nBlocks > 0:
-            self.cache  = Cache(self.nBlocks, self.blksize, self.mPenalty, self.mIssueTime)
+            self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
         else:
             self.cache = None
 
