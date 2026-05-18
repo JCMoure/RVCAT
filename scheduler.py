@@ -286,7 +286,7 @@ class Scheduler:
         ExecGraph     = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
         while retired < self.n:
-            retires, used_ports = self.next_cycle()
+            retires, used_ports, _,_,_,_ = self.next_cycle()
 
             for port, used in used_ports.items():
                 port_timeline[port].append(used)
