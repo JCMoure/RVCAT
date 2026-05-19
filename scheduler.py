@@ -202,8 +202,7 @@ class Scheduler:
             addr       = -1
             instr      = _program[static_idx]
             if instr.type == "MEM" or instr.type == "VMEM":
-                if self.cache is not None:
-                  instr_mem  = 1 if instr.oper == "LOAD" else 2
+                instr_mem  = 1 if instr.oper == "LOAD" else 2
                 addr       = instr.addr
                 instr.addr = addr + instr.byte_stride
     
