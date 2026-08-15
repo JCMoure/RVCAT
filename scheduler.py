@@ -14,8 +14,8 @@ class Scheduler:
         self.dispWidth  = 1
         self.retrWidth  = 1
         self.sched      = "optimal"
-        self.blkSize    = 1
         self.nBlocks    = 1
+        self.blkSize    = 1
         self.mPenalty   = 0
         self.mIssueTime = 0
         self.port_mask  = 0
@@ -342,7 +342,7 @@ class Scheduler:
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
 
-        _program.assign_memory_addresses(self.iterations)
+        _program.assign_memory_addresses(process.Nloop)
         
         # Always creat a new cache object to reset cache state, even if nBlocks is 0 (no cache)
         if self.nBlocks > 0:
@@ -411,7 +411,7 @@ class Scheduler:
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
 
-        _program.assign_memory_addresses(self.iterations)
+        _program.assign_memory_addresses(process.Nloop)
         
         if self.nBlocks > 0:
             self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)

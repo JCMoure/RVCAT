@@ -54,49 +54,54 @@ class Instruction:
             "lanes":    self.lanes,
             "stride":   self.stride,
             "latency":  self.latency,
-            "ports":    self.ports
+            "ports":    self.ports,
+            "addr":     self.addr,
+            "byte_stride": self.byte_stride
         }
     
 class Process:
 
     def __init__(self) -> None:
         self.name     = ""
-        self.dispatch = 1
-        self.retire   = 1
-        self.ROBsize  = 20 
-        self.instruction_list = []
-        self.mPenalty   = 1
-        self.mIssueTime = 1
-        self.sched      = "greedy"
-        self.blkSize    = 16
-        self.nBlocks    = 0
-
+        self.Nloop    = 16      # number of loop iterations (not unrolled)
+        self.dispatch = 1       # dispatch width (number of instructions dispatched per cycle)
+        self.retire   = 1       # retire width (number of instructions retired per cycle)
+        self.ROBsize  = 20      # size of the Reorder Buffer (ROB) in number of instructions
+        self.sched   = "greedy" # scheduling policy
+        self.nBlocks    = 0     # number of L1 cache blocks (in bytes) 
+        self.blkSize    = 16    # L1 cache block size (in bytes); unit for memory accesses
+        self.mIssueTime = 1     # memory issue time (in cycles) for a MM request (load/store)
+        self.mPenalty   = 1     # memory penalty (latency in cycles) for a cache miss
+        self.instruction_list = []      # list of instructions in the program (in program order)
+        
     def from_json(data: dict):
         process = Process()
         process.name             = data.get("name", "")
+        process.Nloop            = data.get("Nloop", 16)   # default number of loop iterations (power of 2)
         process.dispatch         = data.get("dispatch", 1)
         process.retire           = data.get("retire", 1)
         process.ROBsize          = data.get("ROBsize", 20)
-        process.instruction_list = data.get("instruction_list", [])
+        process.sched            = data.get("sched", "greedy")
+        process.nBlocks          = data.get("nBlocks", 0)
+        process.blkSize          = data.get("blkSize", 16)
         process.mPenalty         = data.get("mPenalty", 1) 
         process.mIssueTime       = data.get("mIssueTime", 1)
-        process.sched            = data.get("sched", "greedy")
-        process.blkSize          = data.get("blkSize", 16)
-        process.nBlocks          = data.get("nBlocks", 0)
+        process.instruction_list = data.get("instruction_list", [])
         return process
 
     def json(self) -> dict:
         return {
             "name":             self.name,
+            "Nloop":            self.Nloop,
             "dispatch":         self.dispatch,
             "retire":           self.retire,
             "ROBsize":          self.ROBsize,
-            "instruction_list": self.instruction_list,
+            "sched":            self.sched,
+            "nBlocks":          self.nBlocks,
+            "blkSize":          self.blkSize,
             "mPenalty":         self.mPenalty,
             "mIssueTime":       self.mIssueTime,
-            "sched":            self.sched,
-            "blkSize":          self.blkSize,
-            "nBlocks":          self.nBlocks
+            "instruction_list": self.instruction_list
         }
 
 class Program:
@@ -104,8 +109,8 @@ class Program:
     def __init__(self) -> None:
 
         # data loaded/stored which do not change during execution
-        self.n                = 0
-        self.instruction_list = []
+        self.n                = 0       # number of instructions in the program
+        self.instruction_list = []      # list of instructions in the program (in program order)
 
         # data generated when loading a new program. Do not need to save it
         self.variables    = [] # variable names (each appears only once, in program order)
@@ -114,8 +119,8 @@ class Program:
         self.loop_carried = [] # list of tuples of loop-carried variables: (producer_id,var_name)
         self.arrays       = [] # list of array variable names in program order
 
-        self.inst_dependence_list = []  ## list of instruction data dependencies
-        self.dependence_edges     = []  ## list of dependence offsets
+        self.inst_dependence_list = []  # list of instruction data dependencies
+        self.dependence_edges     = []  # list of dependence offsets
         self.cyclic_paths         = []  # list of cyclic paths (a list of inst_ids)
         self.inst_cyclic          = []  # list of inst_ids in cyclic paths (only once)
 
@@ -129,7 +134,7 @@ class Program:
         for instr_dict in instrs:
             self.instruction_list.append(Instruction.from_json(instr_dict))
         self.n            = len(self.instruction_list)
-        self.loop_stride  = 1 # by default, loop stride is 1
+        self.loop_stride  = 1  # by default, loop stride is 1
         self.variables    = [] # variable names (each appears only once, in program order)
         self.constants    = [] # constant values/variable names (only once, program order)
         self.loop_carried = [] # index to list of variable names which are loop-carried
@@ -407,11 +412,6 @@ class Program:
             min_iters = max( iters, min_iters )
 
         return (max_latency, min_iters, path_latencies)
-
-    def show_memory_trace(self) -> str:
-        out = "............................. Memory Trace Description ..........................."
-        out += "\n...............................................................................\n\n"
-        return out
 
     def show_graphviz(  self, 
                         instrs       = None,
