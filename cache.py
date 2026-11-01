@@ -60,7 +60,7 @@ class Cache:
     if (pos >= 0): 
       if self.DATA[pos] > current_cycle:  # SECONDARY MISS
         result  = 2  # CACHE_2ND
-        latency = self.DATA[pos] + 1 - current_cycle
+        latency = int(self.DATA[pos]) + 1 - current_cycle
         self.DATA[pos] += 1     # one secondary miss to same cache line per cycle
       # else: HIT, no latency
 
