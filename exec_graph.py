@@ -63,20 +63,32 @@ def get_iteration_idx( n, index ):
      return iteration, static_idx
 
 def longest_path (ExecGraph):
-      N = len(ExecGraph)
-      dist = [-10**9 for i in range(N)]  # initialize distances to all vertices as infinite
-      path = [  []   for i in range(N)]  # initialize longest path to all vertices as EMPTY
+      node_count = len(ExecGraph)
+      dist = [-10**9 for _ in range(node_count)]
+      next_node = [-1 for _ in range(node_count)]
+      path_weight = [0 for _ in range(node_count)]
 
-      dist[N-1] = 0
-      path[N-1] = [[N-1, 1]]
-      for u in range(N-1,0,-1):
-          for node in ExecGraph[u]:
-              if dist[node[0]] < dist[u] + node[1]:
-                    dist[node[0]] = dist[u] + node[1]
-                    new_path      = path[u] + [node]
-                    path[node[0]] = new_path
+      sink = node_count - 1
+      dist[sink] = 0
+      for node in range(sink, 0, -1):
+          for dependency, weight in ExecGraph[node]:
+              if dist[dependency] < dist[node] + weight:
+                    dist[dependency] = dist[node] + weight
+                    next_node[dependency] = node
+                    path_weight[dependency] = weight
 
-      return path[0]
+      path = []
+      node = 0
+      while node != sink and next_node[node] != -1:
+          path.append([node, path_weight[node]])
+          node = next_node[node]
+
+      if node != sink:
+          return []
+
+      path.append([sink, 1])
+      path.reverse()
+      return path
 
 def serialize_execution_graph(ExecGraph, dynamic_instruction_count):
     node_count = len(ExecGraph)

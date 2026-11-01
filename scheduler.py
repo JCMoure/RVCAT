@@ -325,7 +325,10 @@ class Scheduler:
 
         return timeline, port_timeline, INSTR_Info, critical_path, ExecGraph
 
-    def get_timeline(self, processJSON, niters: int = 3) -> str:
+    def get_timeline(self, processJSON, niters: int = 3, nret=None) -> str:
+
+        if nret is not None and (isinstance(nret, bool) or not isinstance(nret, int) or nret < 1):
+            raise ValueError("nret must be a positive integer.")
 
         process = Process.from_json(processJSON)
         _program.load_instruction_list(process.instruction_list)
@@ -351,7 +354,7 @@ class Scheduler:
             self.cache = None
             
         self.num_instr  = _program.n
-        self.n          = niters*self.num_instr
+        self.n          = nret if nret is not None else niters*self.num_instr
         self.pc         = 0
         self.cycles     = 0
         self.dispatched = 0

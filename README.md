@@ -45,8 +45,16 @@ Rows are ordered by dynamic instruction index, which aligns them with graph node
 The `critical_cycles` values remain in the response during the transition to
 client-side path calculation so consumers can compare results.
 
+`Scheduler.get_timeline(processJSON, niters=3, nret=None)` preserves the legacy
+iteration-based behavior when `nret` is omitted. When supplied, `nret` sets the
+exact number of dynamic instructions simulated for the timeline and takes precedence
+over `niters`; it does not change `processJSON["Nloop"]`, which determines memory
+addresses. A timeline may therefore end partway through a loop iteration.
+
 Consumers should reject unsupported graph versions or inconsistent node/row counts.
-Longest-path calculation is linear in graph nodes plus edges (`O(V + E)`).
+Longest-path calculation is linear in graph nodes plus edges (`O(V + E)`). It stores
+distances and predecessor links, reconstructing only the selected path instead of
+copying a full path for every graph node.
 
 ## Requirements
 * Python 3.8 or higher
