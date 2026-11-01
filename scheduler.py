@@ -323,7 +323,7 @@ class Scheduler:
 
         critical_path = ex.longest_path(ExecGraph)
 
-        return timeline, port_timeline, INSTR_Info, critical_path
+        return timeline, port_timeline, INSTR_Info, critical_path, ExecGraph
 
     def get_timeline(self, processJSON, niters: int = 3) -> str:
 
@@ -365,7 +365,7 @@ class Scheduler:
         ports        = [i for i in range(32) if (all_ports >> i) & 1]
         self.n_ports = len(ports)
 
-        timeline, _, INSTR_Info, critical_path = self.generate_timeline(ports) 
+        timeline, _, INSTR_Info, critical_path, ExecGraph = self.generate_timeline(ports)
 
         instructions = []    # List of timeline.instructions
 
@@ -391,6 +391,7 @@ class Scheduler:
         timelineJson["cycles"]       = self.cycles
         timelineJson["instructions"] = instructions
         timelineJson["arrays"]       = _program.arrays
+        timelineJson["critical_path_graph"] = ex.serialize_execution_graph(ExecGraph, self.n)
 
         return json.dumps(timelineJson)
 

@@ -78,6 +78,21 @@ def longest_path (ExecGraph):
 
       return path[0]
 
+def serialize_execution_graph(ExecGraph, dynamic_instruction_count):
+    node_count = len(ExecGraph)
+    return {
+        "version": 1,
+        "dynamic_instruction_count": dynamic_instruction_count,
+        "node_count": node_count,
+        "source": 0,
+        "sink": node_count - 1,
+        "stages": ["dispatch", "execute", "retire"],
+        "dependencies_by_node": [
+            [[dependency, weight] for dependency, weight in dependencies]
+            for dependencies in ExecGraph
+        ]
+    }
+
 def critical_path_statistics_json (N, instr_list, path):
     total_lat = 0
     histogram = [0 for i in range(N)]
