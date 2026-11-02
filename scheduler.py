@@ -47,6 +47,8 @@ class Scheduler:
             instr       = self.window[window_idx]
             static_idx  = instr.s_idx
             dynamic_idx = instr.d_idx
+            instr.waiting_for = None
+            instr.waiting_ports = []
 
             if instr.state == InstrState.WRITE_BACK:
                 if rw:
@@ -83,7 +85,9 @@ class Scheduler:
                         instr.substate = InstrState.WAIT_MM_RDY_UPDT
                         instr.latency = self.mIssueTime
                     else:
-                        result, instr.latency = self.cache.access(instr.memory-1, instr.memAddr, self.cycles)
+                        result, instr.latency = self.cache.access(
+                            instr.memory-1, instr.memAddr, self.cycles, instr.d_idx
+                        )
                         instr.exec_lat += instr.latency   # add extra latency in case of cache miss
                         if result == 0:  # HIT
                             instr.state    = InstrState.WRITE_BACK
@@ -122,6 +126,7 @@ class Scheduler:
             elif instr.state == InstrState.DISPATCH:
                 if instr.substate in [InstrState.NONE, InstrState.WAIT_DATA]:
                     instr.substate = InstrState.NONE
+                    instr.waiting_for = []
                   
                     for dependence_offset in self.DepEdges[static_idx]:
                         instr_dep = self.window.get_instr( dynamic_idx - dependence_offset )
@@ -130,7 +135,8 @@ class Scheduler:
                         else:
                             if instr_dep.state not in [InstrState.WRITE_BACK, InstrState.RETIRE]:
                                 instr.substate = InstrState.WAIT_DATA
-                                break
+                                if instr_dep.d_idx not in instr.waiting_for:
+                                    instr.waiting_for.append(instr_dep.d_idx)
 
                 if instr.substate != InstrState.WAIT_DATA:
                     port_mask = _program.instruction_list[static_idx].ports
@@ -154,6 +160,9 @@ class Scheduler:
                                 break
                         if instr.state == InstrState.DISPATCH:
                             instr.substate  = InstrState.WAIT_RESOURCE
+                            instr.waiting_ports = [
+                                port for port in required_ports if used_ports[port]
+                            ] or required_ports
                             instr.exec_lat += 1
                       else:
                         instr.substate  = InstrState.WAIT_BANDWIDTH
@@ -186,6 +195,9 @@ class Scheduler:
                     xw -= 1
                   else:
                     instr.substate  = InstrState.WAIT_RESOURCE
+                    instr.waiting_ports = [
+                        port for port in issue_queue[w_idx] if used_ports[port]
+                    ] or issue_queue[w_idx]
                     instr.exec_lat += 1
               else:
                   instr.substate  = InstrState.WAIT_BANDWIDTH
@@ -280,12 +292,30 @@ class Scheduler:
 
         timeline      = {i:[] for i in range(self.n + self.window.size + rw)}
         port_timeline = {port:[] for port in ports}
+        cache_states = []
+        last_cache_state = None
         INSTR_Info    = []
+        self.wait_details = []
 
         ExecGraph     = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
         while retired < self.n:
             retires, used_ports, _,_,_,_ = self.next_cycle()
+
+            if self.cache is not None:
+                cache_cycle = self.cycles - 1
+                cache_state = self.cache.get_state(cache_cycle)
+                cache_signature = tuple(
+                    (line["valid"], line["address"], line["dirty"], line["lru"],
+                     line["ready_cycle"], line["loading"])
+                    for line in cache_state
+                )
+                if cache_signature != last_cache_state:
+                    cache_states.append({
+                        "cycle": cache_cycle,
+                        "lines": cache_state,
+                    })
+                    last_cache_state = cache_signature
 
             for port, used in used_ports.items():
                 port_timeline[port].append(used)
@@ -318,12 +348,32 @@ class Scheduler:
             for instr in self.window:
                 if instr.substate != InstrState.NONE:
                     timeline[instr.d_idx].append((self.cycles, instr.substate))
+                    if instr.substate == InstrState.WAIT_DATA:
+                        self.wait_details.append({
+                            "cycle": self.cycles - 1,
+                            "instruction_index": instr.d_idx,
+                            "reason": "data",
+                            "dependencies": instr.waiting_for,
+                        })
+                    elif instr.substate == InstrState.WAIT_RESOURCE:
+                        self.wait_details.append({
+                            "cycle": self.cycles - 1,
+                            "instruction_index": instr.d_idx,
+                            "reason": "ports",
+                            "ports": instr.waiting_ports,
+                        })
+                    elif instr.substate == InstrState.WAIT_BANDWIDTH:
+                        self.wait_details.append({
+                            "cycle": self.cycles - 1,
+                            "instruction_index": instr.d_idx,
+                            "reason": "issue-bandwidth",
+                        })
                 else:
                     timeline[instr.d_idx].append((self.cycles, instr.state))
 
         critical_path = ex.longest_path(ExecGraph)
 
-        return timeline, port_timeline, INSTR_Info, critical_path, ExecGraph
+        return timeline, port_timeline, INSTR_Info, critical_path, ExecGraph, cache_states
 
     def get_timeline(self, processJSON, niters: int = 3, nret=None) -> str:
 
@@ -349,7 +399,10 @@ class Scheduler:
         
         # Always creat a new cache object to reset cache state, even if nBlocks is 0 (no cache)
         if self.nBlocks > 0:
-            self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+            self.cache  = Cache(
+                self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime,
+                record_requests=True
+            )
         else:
             self.cache = None
             
@@ -368,7 +421,7 @@ class Scheduler:
         ports        = [i for i in range(32) if (all_ports >> i) & 1]
         self.n_ports = len(ports)
 
-        timeline, _, INSTR_Info, critical_path, ExecGraph = self.generate_timeline(ports)
+        timeline, port_timeline, INSTR_Info, critical_path, ExecGraph, cache_states = self.generate_timeline(ports)
 
         instructions = []    # List of timeline.instructions
 
@@ -395,6 +448,23 @@ class Scheduler:
         timelineJson["instructions"] = instructions
         timelineJson["arrays"]       = _program.arrays
         timelineJson["critical_path_graph"] = ex.serialize_execution_graph(ExecGraph, self.n)
+        timelineJson["wait_details"] = self.wait_details
+        timelineJson["resource_usage"] = {
+            "ports": port_timeline
+        }
+        if self.cache is not None:
+            mm_usage = [False] * self.cycles
+            for request in self.cache.MEM_requests:
+                request_start = request["cycle"]
+                for cycle in range(request_start, request_start + self.mIssueTime):
+                    if 0 <= cycle < self.cycles:
+                        mm_usage[cycle] = True
+            timelineJson["resource_usage"]["mm"] = mm_usage
+            timelineJson["resource_usage"]["mm_requests"] = self.cache.MEM_requests
+            timelineJson["resource_usage"]["cache_state"] = {
+                "line_count": self.cache.CACHE_SIZE,
+                "snapshots": cache_states,
+            }
 
         return json.dumps(timelineJson)
 
@@ -517,7 +587,9 @@ class Scheduler:
         out["MM_Reads"]       = RdMisses+WrMisses
         out["MM_Writes"]      = MM_writes
 
-        out["critical_path"]   = ex.critical_path_statistics_json(self.num_instr, _program.instruction_list, critical_path)
+        out["critical_path"]   = ex.critical_path_statistics_json(
+            self.num_instr, _program.instruction_list, critical_path, self.iterations
+        )
         return json.dumps(out)
 
 _scheduler = Scheduler()

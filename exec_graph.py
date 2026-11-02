@@ -1,4 +1,37 @@
+from array import array
 from math import inf
+
+
+class CompactExecutionGraph:
+
+    __slots__ = ("offsets", "dependencies", "weights")
+
+    def __init__(self):
+        self.offsets = array("I", [0])
+        self.dependencies = array("I")
+        self.weights = array("q")
+
+    def __len__(self):
+        return len(self.offsets) - 1
+
+    def append_node(self, edges):
+        for dependency, weight in edges:
+            self.dependencies.append(dependency)
+            self.weights.append(weight)
+        self.offsets.append(len(self.dependencies))
+
+    def iter_edges(self, node):
+        start = self.offsets[node]
+        end = self.offsets[node + 1]
+        for edge in range(start, end):
+            yield self.dependencies[edge], self.weights[edge]
+
+    def to_list(self):
+        return [
+            [[dependency, weight] for dependency, weight in self.iter_edges(node)]
+            for node in range(len(self))
+        ]
+
 
 def old_priority(isps):
       _ais    = [inf]               # assigned instructions
@@ -29,30 +62,28 @@ def old_priority(isps):
 
 def generate_execution_graph (static_instructions, N, window_size, DepEdges):
 
-   ExecGraph = []
+   ExecGraph = CompactExecutionGraph()
         
-   # First Node contains a fake arch on dispatch node and retire node, 
-   # that will be removed after inserting values
    for i in range(0,N):  # each dynamic instruction executed, except first one
 
-      # Insert node corresponding to dispatch stage of current instruction
-      DispatchEdges = [ [(i-1)*3 , 0] ]   # Dispatch node depends on dispatch of previous instruction
+      DispatchEdges = []
+      if i > 0:
+           DispatchEdges.append(((i-1)*3, 0))
       if i >= window_size :  # Dependence on Retire node corresponding to finite ROB (Window) size
-           DispatchEdges.append( [(i-window_size)*3+2 , 0] )
-      ExecGraph.append( DispatchEdges)   # Add Dispatch node
+           DispatchEdges.append(((i-window_size)*3+2, 0))
+      ExecGraph.append_node(DispatchEdges)
 
-      # Insert node corresponding to execution stage of current instruction
-      ExecuteEdges = [ [i*3, 1] ]  # depends on dispatch of current instruction, with latency = 1
+      ExecuteEdges = [(i*3, 1)]
       for dep_offsets in DepEdges[ i % static_instructions]:
            j = i - dep_offsets
            if j >= 0:  # dependence on dynamic instruction
-               ExecuteEdges.append( [j*3+1, 0] )  # depends on execution stage of prev. instr. (latency annotated later)
-      ExecGraph.append( ExecuteEdges )  # Add Execution node
+               ExecuteEdges.append((j*3+1, 0))
+      ExecGraph.append_node(ExecuteEdges)
 
-      # Insert node corresponding to retire stage of current instruction
-      RetireEdges = [ [i*3+1, 1] ]  # depends on execution stage of current instr., lat=1 + measured execution latency (later)
-      RetireEdges.append([(i-1)*3+2, 0])  # depends on retire of previous instruction
-      ExecGraph.append( RetireEdges )     # Add Retire node
+      RetireEdges = [(i*3+1, 1)]
+      if i > 0:
+           RetireEdges.append(((i-1)*3+2, 0))
+      ExecGraph.append_node(RetireEdges)
 
    return ExecGraph
 
@@ -70,12 +101,22 @@ def longest_path (ExecGraph):
 
       sink = node_count - 1
       dist[sink] = 0
-      for node in range(sink, 0, -1):
-          for dependency, weight in ExecGraph[node]:
-              if dist[dependency] < dist[node] + weight:
-                    dist[dependency] = dist[node] + weight
-                    next_node[dependency] = node
-                    path_weight[dependency] = weight
+      if isinstance(ExecGraph, CompactExecutionGraph):
+          for node in range(sink, 0, -1):
+              for edge in range(ExecGraph.offsets[node], ExecGraph.offsets[node + 1]):
+                  dependency = ExecGraph.dependencies[edge]
+                  weight = ExecGraph.weights[edge]
+                  if dist[dependency] < dist[node] + weight:
+                        dist[dependency] = dist[node] + weight
+                        next_node[dependency] = node
+                        path_weight[dependency] = weight
+      else:
+          for node in range(sink, 0, -1):
+              for dependency, weight in ExecGraph[node]:
+                  if dist[dependency] < dist[node] + weight:
+                        dist[dependency] = dist[node] + weight
+                        next_node[dependency] = node
+                        path_weight[dependency] = weight
 
       path = []
       node = 0
@@ -100,12 +141,64 @@ def serialize_execution_graph(ExecGraph, dynamic_instruction_count):
         "sink": node_count - 1,
         "stages": ["dispatch", "execute", "retire"],
         "dependencies_by_node": [
-            [[int(dependency), int(weight)] for dependency, weight in dependencies]
-            for dependencies in ExecGraph
+            [[int(dependency), int(weight)] for dependency, weight in
+             (ExecGraph.iter_edges(node) if isinstance(ExecGraph, CompactExecutionGraph) else ExecGraph[node])]
+            for node in range(node_count)
         ]
     }
 
-def critical_path_statistics_json (N, instr_list, path):
+def find_repeating_critical_path_pattern(N, instr_list, path, iterations):
+    if N < 1 or iterations < 1 or not path:
+        return None
+
+    signatures = [[] for _ in range(iterations)]
+    for node, weight in reversed(path):
+        dynamic_idx = node // 3
+        iteration = dynamic_idx // N
+        if iteration < iterations:
+            signatures[iteration].append(
+                (dynamic_idx % N, node % 3, int(weight))
+            )
+
+    best_start = 0
+    best_end = 0
+    start = 0
+    while start < iterations:
+        signature = signatures[start]
+        if not signature:
+            start += 1
+            continue
+        end = start + 1
+        while end < iterations and signatures[end] == signature:
+            end += 1
+        if end - start > best_end - best_start:
+            best_start, best_end = start, end
+        start = end
+
+    if best_end - best_start < 2:
+        return None
+
+    signature = signatures[best_start]
+    return {
+        "start_iteration": best_start + 1,
+        "end_iteration": best_end,
+        "repetitions": best_end - best_start,
+        "cycles_per_iteration": sum(weight for _, _, weight in signature),
+        "prefix_iterations": best_start,
+        "suffix_iterations": iterations - best_end,
+        "nodes": [
+            {
+                "instruction_index": instruction_idx,
+                "instruction": instr_list[instruction_idx].text,
+                "stage": ("dispatch", "execute", "retire")[stage],
+                "cycles": weight
+            }
+            for instruction_idx, stage, weight in signature
+        ]
+    }
+
+
+def critical_path_statistics_json (N, instr_list, path, iterations=None):
     total_lat = 0
     histogram = [0 for i in range(N)]
     decode_lat= 0
@@ -131,6 +224,14 @@ def critical_path_statistics_json (N, instr_list, path):
     out['dispatch'] = 100*decode_lat/total_lat
     out['retire']   = 100*retire_lat/total_lat
 
+    if iterations is None:
+        iterations = max((node[0] // 3) // N for node in path) + 1
+    repeating_pattern = find_repeating_critical_path_pattern(
+        N, instr_list, path, iterations
+    )
+    if repeating_pattern is not None:
+        out["repeating_pattern"] = repeating_pattern
+
     return out
 
 def exec_graph_update(ExecGraph, dynamic_idx, disp_latency, exec_latency, ret_latency):
@@ -142,17 +243,37 @@ def exec_graph_update(ExecGraph, dynamic_idx, disp_latency, exec_latency, ret_la
      if ret_latency > 1:
          ret_latency = 1
 
-     ExecGraph[dynamic_idx*3+0][0][1]  = disp_latency  # update dispatch latency on node
+     dispatch_node = dynamic_idx*3
+     execute_node = dispatch_node + 1
+     retire_node = dispatch_node + 2
 
-     for dep_node in ExecGraph[dynamic_idx*3+1][1:]:   # update execution latencies of dependent instructions
+     if isinstance(ExecGraph, CompactExecutionGraph):
+        dispatch_edge = ExecGraph.offsets[dispatch_node]
+        if dynamic_idx > 0:
+            ExecGraph.weights[dispatch_edge] = disp_latency
+
+        for edge in range(ExecGraph.offsets[execute_node] + 1, ExecGraph.offsets[execute_node + 1]):
+            dependency = ExecGraph.dependencies[edge]
+            dependency_dispatch_edge = ExecGraph.offsets[dependency + 1]
+            ExecGraph.weights[edge] = ExecGraph.weights[dependency_dispatch_edge] - 1
+
+        retire_edge = ExecGraph.offsets[retire_node]
+        ExecGraph.weights[retire_edge] += exec_latency
+        if dynamic_idx > 0:
+            ExecGraph.weights[retire_edge + 1] = ret_latency
+        return
+
+     ExecGraph[dispatch_node][0][1] = disp_latency
+
+     for dep_node in ExecGraph[execute_node][1:]:
         dep_node[1] = ExecGraph[dep_node[0]+1][0][1] - 1
 
-     ExecGraph[dynamic_idx*3+2][0][1] += exec_latency  # update execution latency of retire node
-     ExecGraph[dynamic_idx*3+2][1][1]  = ret_latency   # update retire latency on node
+     ExecGraph[retire_node][0][1] += exec_latency
+     ExecGraph[retire_node][1][1] = ret_latency
 
      if dynamic_idx == 0:
-        ExecGraph[0].pop(-1)  # remove last arch from first dispatch node
-        ExecGraph[2].pop(-1)  # remove last arch from first retire node
+        ExecGraph[0].pop(-1)
+        ExecGraph[2].pop(-1)
 
 # NOT USED, but useful for debugging
 def get_node_arch ( n, index, cost ):
@@ -168,6 +289,8 @@ def get_node_arch ( n, index, cost ):
 
 # NOT USED, but useful for debugging
 def print_graph ( n, ExecGraph ):
+    if isinstance(ExecGraph, CompactExecutionGraph):
+        ExecGraph = ExecGraph.to_list()
 
     def get_list_of_edges (list):
         str = ""

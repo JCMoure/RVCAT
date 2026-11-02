@@ -10,8 +10,19 @@ The tool is tailored to be used as a kernel of a web-based interactive applicati
 ## Timeline critical-path data
 
 `Scheduler.get_timeline()` returns JSON with the existing `cycles`, `instructions`, and
-`arrays` fields, plus `critical_path_graph`. The graph lets a consumer independently
-compute the same longest weighted execution path from the completed simulation.
+`arrays` fields, plus `critical_path_graph` and per-cycle `resource_usage`. The graph
+lets a consumer independently compute the same longest weighted execution path from
+the completed simulation. When a cache is enabled, `resource_usage.mm_requests` lists
+each Main Memory request with its starting cycle, block address, read/write operation,
+originating dynamic instruction index, and reserved channel duration. Store misses
+are recorded as `read_for_write` requests; dirty-block writebacks are `write` requests.
+When a cache is enabled, `resource_usage.cache_state` contains transition snapshots
+of each cache line at the end of a cycle, including its block address, dirty bit,
+LRU rank, and pending-fill ready cycle. Snapshots are recorded only when line state
+changes.
+`wait_details` identifies the dynamic instruction and cycle behind port conflicts,
+issue-width limits, and unresolved data dependencies. A data wait lists every
+outstanding producer in its `dependencies` array.
 
 The graph has this versioned shape:
 
@@ -50,6 +61,12 @@ iteration-based behavior when `nret` is omitted. When supplied, `nret` sets the
 exact number of dynamic instructions simulated for the timeline and takes precedence
 over `niters`; it does not change `processJSON["Nloop"]`, which determines memory
 addresses. A timeline may therefore end partway through a loop iteration.
+
+The execution graph is stored internally in packed offset, dependency, and weight
+arrays. This preserves edge ordering and path tie-breaking while avoiding per-edge
+Python lists. Simulation results also include `critical_path.repeating_pattern`
+when identical non-empty critical-path signatures occur in consecutive iterations;
+the signature includes each instruction, stage, and cycle weight.
 
 Consumers should reject unsupported graph versions or inconsistent node/row counts.
 Longest-path calculation is linear in graph nodes plus edges (`O(V + E)`). It stores
