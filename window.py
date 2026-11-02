@@ -9,6 +9,7 @@ class InstrState(Enum):
     WRITE_BACK      = "W"
     RETIRE          = "R"
     WAIT_RESOURCE   = "*"
+    WAIT_RETURN_QUEUE = "@"
     WAIT_RETIRE     = "-"
     WAIT_DATA       = "."
     WAIT_BANDWIDTH  = "^"
@@ -37,6 +38,7 @@ class InstrInstance:
         self.exec_lat = 0       # statistic of total execution latency, including waiting for resources
         self.waiting_for = []
         self.waiting_ports = []
+        self.port_uses = []
 
 def __repr__(self) -> str:
         return f"{self.d_idx}: <{self.s_idx}, {self.cycle}>"

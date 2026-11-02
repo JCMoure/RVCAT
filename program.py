@@ -72,6 +72,9 @@ class Process:
         self.blkSize    = 16    # L1 cache block size (in bytes); unit for memory accesses
         self.mIssueTime = 1     # memory issue time (in cycles) for a MM request (load/store)
         self.mPenalty   = 1     # memory penalty (latency in cycles) for a cache miss
+        self.nFillBuffers = 2   # maximum number of concurrent cache-block fills
+        self.nWriteBuffers = 2 # maximum number of pending dirty-block writebacks
+        self.rThru = 1          # maximum number of returned memory instructions per cycle
         self.instruction_list = []      # list of instructions in the program (in program order)
         
     def from_json(data: dict):
@@ -86,6 +89,14 @@ class Process:
         process.blkSize          = data.get("blkSize", 16)
         process.mPenalty         = data.get("mPenalty", 1) 
         process.mIssueTime       = data.get("mIssueTime", 1)
+        process.nFillBuffers     = data.get("nFillBuffers", 2)
+        process.nWriteBuffers    = data.get("nWriteBuffers", 2)
+        process.rThru            = data.get("rThru", 1)
+        if process.mPenalty < process.mIssueTime:
+            raise ValueError("mPenalty must be greater than or equal to mIssueTime.")
+        if isinstance(process.rThru, bool) or not isinstance(process.rThru, int) or \
+                not 1 <= process.rThru <= 32:
+            raise ValueError("rThru must be an integer between 1 and 32.")
         process.instruction_list = data.get("instruction_list", [])
         return process
 
@@ -101,6 +112,9 @@ class Process:
             "blkSize":          self.blkSize,
             "mPenalty":         self.mPenalty,
             "mIssueTime":       self.mIssueTime,
+            "nFillBuffers":     self.nFillBuffers,
+            "nWriteBuffers":    self.nWriteBuffers,
+            "rThru":            self.rThru,
             "instruction_list": self.instruction_list
         }
 

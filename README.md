@@ -14,15 +14,31 @@ The tool is tailored to be used as a kernel of a web-based interactive applicati
 lets a consumer independently compute the same longest weighted execution path from
 the completed simulation. When a cache is enabled, `resource_usage.mm_requests` lists
 each Main Memory request with its starting cycle, block address, read/write operation,
-originating dynamic instruction index, and reserved channel duration. Store misses
-are recorded as `read_for_write` requests; dirty-block writebacks are `write` requests.
+originating dynamic instruction indices, and reserved channel duration. Store misses
+are recorded as `read_for_write` requests; dirty-block writebacks are `write` requests
+with no instruction owner.
 When a cache is enabled, `resource_usage.cache_state` contains transition snapshots
 of each cache line at the end of a cycle, including its block address, dirty bit,
-LRU rank, and pending-fill ready cycle. Snapshots are recorded only when line state
-changes.
+LRU rank, and pending-fill ready cycle. `resource_usage.fill_buffers` and
+`resource_usage.write_buffers` contain cycle-by-cycle slot snapshots. Distinct misses
+are admitted in program age order while fill and write-buffer capacity is available;
+misses to the same block merge into one fill. A fill reserves a cache line until its
+MM read completes. A dirty victim is copied into a write buffer and written before
+the replacement block is fetched. Buffer capacities default to two and are configurable
+with `nFillBuffers` and `nWriteBuffers` (1 to 32).
+Instructions that join a block already loading are marked as secondary misses.
+When the fill completes, waiting loads and stores enter an independent return
+queue. Its `rThru` parameter (1 to 32, default 1) limits returned instructions
+per cycle; requests are served in program age order and do not pay execution
+latency again or re-enter issue-port arbitration. `@` marks an instruction waiting
+for this return queue.
+The miss penalty must be greater than or equal to the MM issue time.
 `wait_details` identifies the dynamic instruction and cycle behind port conflicts,
-issue-width limits, and unresolved data dependencies. A data wait lists every
-outstanding producer in its `dependencies` array.
+issue-width limits, unresolved data dependencies, and cache-buffer waits. A data wait
+lists every outstanding producer in its `dependencies` array. The cache model does not
+include a Load/Store Queue, memory-dependency tracking, or load/store bypass.
+`resource_usage.port_owners` lists dynamic instruction indices by port and cycle,
+including post-fill cache retries.
 
 The graph has this versioned shape:
 

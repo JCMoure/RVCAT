@@ -18,6 +18,9 @@ class Scheduler:
         self.blkSize    = 1
         self.mPenalty   = 0
         self.mIssueTime = 0
+        self.nFillBuffers = 2
+        self.nWriteBuffers = 2
+        self.rThru = 1
         self.port_mask  = 0
         self.n_ports    = 0
         self.cache      = None
@@ -41,6 +44,21 @@ class Scheduler:
         SecondMisses= []
         WriteMisses = []
         MMupdates   = []
+        if self.cache is not None:
+            MMupdates.extend(self.cache.advance(self.cycles))
+            returned_instructions = set(self.cache.returned_instructions)
+            for instr in self.window:
+                if instr.state in (InstrState.LOAD, InstrState.STORE) and \
+                        instr.substate in (
+                            InstrState.WAIT_MM_REQUEST,
+                            InstrState.WAIT_MM_READY,
+                            InstrState.WAIT_DATA_READY,
+                            InstrState.WAIT_CACHE_2ND,
+                            InstrState.WAIT_RETURN_QUEUE,
+                        ) and instr.d_idx in returned_instructions:
+                    self.cache.consume_completion(instr.d_idx)
+                    instr.state = InstrState.WRITE_BACK
+                    instr.substate = InstrState.NONE
 
         for window_idx in range(self.window.count):
 
@@ -62,60 +80,64 @@ class Scheduler:
                     instr.substate = InstrState.WAIT_RETIRE
 
             elif instr.state == InstrState.LOAD or instr.state == InstrState.STORE:
-                instr.latency -= 1
-                if instr.latency == 0:
-                    if instr.substate == InstrState.WAIT_DATA_READY or instr.substate == InstrState.WAIT_CACHE_2ND or self.cache is None:
-                        instr.state    = InstrState.WRITE_BACK
+                if self.cache is None:
+                    instr.latency -= 1
+                    if instr.latency <= 0:
+                        instr.state = InstrState.WRITE_BACK
                         instr.substate = InstrState.NONE
-                    elif instr.substate == InstrState.MM_UPDATE:
-                        instr.substate = InstrState.WAIT_DATA_READY
-                        instr.latency = self.mPenalty - self.mIssueTime - 1
-                        instr.exec_lat += self.mPenalty                    
-                    elif instr.substate == InstrState.WAIT_MM_READY:
-                        instr.substate = InstrState.WAIT_DATA_READY
-                        instr.latency = self.mPenalty - self.mIssueTime
-                        instr.exec_lat += self.mPenalty
-                    elif instr.substate == InstrState.WAIT_MM_RDY_UPDT:
-                        instr.substate = InstrState.MM_UPDATE
-                        instr.latency = 1
-                    elif instr.substate == InstrState.WAIT_MM_REQUEST:
+                elif instr.substate in (
+                    InstrState.WAIT_MM_REQUEST,
+                    InstrState.WAIT_MM_READY,
+                    InstrState.WAIT_DATA_READY,
+                    InstrState.WAIT_CACHE_2ND,
+                    InstrState.WAIT_RETURN_QUEUE,
+                ):
+                    request_state = self.cache.get_request_state(dynamic_idx)
+                    if request_state == "returned":
+                        self.cache.consume_completion(dynamic_idx)
+                        instr.state = InstrState.WRITE_BACK
+                        instr.substate = InstrState.NONE
+                    elif request_state == "return_queue":
+                        instr.substate = InstrState.WAIT_RETURN_QUEUE
+                        instr.exec_lat += 1
+                    elif request_state in (
+                        "queued_fill",
+                        "queued_line",
+                        "queued_write",
+                        "waiting_mm",
+                    ):
+                        instr.substate = InstrState.WAIT_MM_REQUEST
+                        instr.exec_lat += 1
+                    elif request_state == "waiting_writeback":
                         instr.substate = InstrState.WAIT_MM_READY
-                        instr.latency = self.mIssueTime
-                    elif instr.substate == InstrState.WAIT_MM_REQ_UPDT:
-                        instr.substate = InstrState.WAIT_MM_RDY_UPDT
-                        instr.latency = self.mIssueTime
+                        instr.exec_lat += 1
                     else:
-                        result, instr.latency = self.cache.access(
-                            instr.memory-1, instr.memAddr, self.cycles, instr.d_idx
+                        instr.substate = InstrState.WAIT_DATA_READY
+                        instr.exec_lat += 1
+                else:
+                    instr.latency -= 1
+                    if instr.latency <= 0:
+                        result = self.cache.request_access(
+                            instr.memory - 1,
+                            instr.memAddr,
+                            self.cycles,
+                            dynamic_idx,
                         )
-                        instr.exec_lat += instr.latency   # add extra latency in case of cache miss
-                        if result == 0:  # HIT
-                            instr.state    = InstrState.WRITE_BACK
+                        if result == "hit":
+                            instr.state = InstrState.WRITE_BACK
                             instr.substate = InstrState.NONE
-                        elif result == 1:  # Primary miss
+                        else:
                             if instr.memory == 1:
-                                ReadMisses.append(instr.d_idx)
-                            else:                       
-                                WriteMisses.append(instr.d_idx)
-                            if instr.latency > 0:
-                                instr.substate = InstrState.WAIT_MM_REQUEST
+                                ReadMisses.append(dynamic_idx)
                             else:
-                                instr.substate = InstrState.WAIT_MM_READY
-                                instr.latency = self.mIssueTime
-                        elif result == 3:  # Primary miss with MM update of dirty block
-                            if instr.memory == 1:
-                                ReadMisses.append(instr.d_idx)
-                            else:                       
-                                WriteMisses.append(instr.d_idx)
-                            MMupdates.append(instr.d_idx)
-                            if instr.latency > 0:
-                                instr.substate = InstrState.WAIT_MM_REQ_UPDT
-                            else:
-                                instr.substate = InstrState.WAIT_MM_RDY_UPDT
-                                instr.latency = self.mIssueTime
-                        else:  # Secondary miss
-                            SecondMisses.append(instr.d_idx)
-                            instr.substate = InstrState.WAIT_CACHE_2ND
+                                WriteMisses.append(dynamic_idx)
+                            if result in ("merged", "secondary"):
+                                SecondMisses.append(dynamic_idx)
+                            instr.substate = (
+                                InstrState.WAIT_CACHE_2ND
+                                if result == "secondary"
+                                else InstrState.WAIT_MM_REQUEST
+                            )
 
             elif instr.state == InstrState.EXECUTE:
                 instr.latency -= 1
@@ -156,6 +178,7 @@ class Scheduler:
                                     instr.state = InstrState.EXECUTE
                                 instr.substate   = InstrState.NONE
                                 instr.port_used  = port
+                                instr.port_uses.append((self.cycles, port))
                                 xw -= 1
                                 break
                         if instr.state == InstrState.DISPATCH:
@@ -179,29 +202,33 @@ class Scheduler:
         if sched:  # Improved scheduling algorithm
             issd_isps = ex.old_priority(issue_queue)
             for w_idx in issue_queue:
-              instr          = self.window[w_idx]
-              instr.substate = InstrState.NONE
-              if xw:
-                  if w_idx in issd_isps:
-                    port             = issd_isps[w_idx]
-                    instr.port_used  = port
-                    used_ports[port] = True
-                    instr.exec_cycle = self.cycles
-                    if instr.memory > 0:
-                        instr.state = InstrState.LOAD if instr.memory == 1 else InstrState.STORE
+                instr          = self.window[w_idx]
+                instr.substate = InstrState.NONE
+                if xw:
+                    if w_idx in issd_isps:
+                        port             = issd_isps[w_idx]
+                        instr.port_used  = port
+                        instr.port_uses.append((self.cycles, port))
+                        used_ports[port] = True
+                        instr.exec_cycle = self.cycles
+                        if instr.memory > 0:
+                            instr.state = InstrState.LOAD if instr.memory == 1 else InstrState.STORE
+                        else:
+                            instr.state = InstrState.EXECUTE
+                        instr.exec_lat += instr.latency
+                        xw -= 1
                     else:
-                        instr.state = InstrState.EXECUTE                      
-                    instr.exec_lat  += instr.latency
-                    xw -= 1
-                  else:
-                    instr.substate  = InstrState.WAIT_RESOURCE
-                    instr.waiting_ports = [
-                        port for port in issue_queue[w_idx] if used_ports[port]
-                    ] or issue_queue[w_idx]
+                        instr.substate = InstrState.WAIT_RESOURCE
+                        instr.waiting_ports = [
+                            port for port in issue_queue[w_idx] if used_ports[port]
+                        ] or issue_queue[w_idx]
+                        instr.exec_lat += 1
+                else:
+                    instr.substate = InstrState.WAIT_BANDWIDTH
                     instr.exec_lat += 1
-              else:
-                  instr.substate  = InstrState.WAIT_BANDWIDTH
-                  instr.exec_lat += 1
+
+        if self.cache is not None:
+            MMupdates.extend(self.cache.advance(self.cycles))
 
         retires = self.retrWidth - rw
         return retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates
@@ -293,6 +320,8 @@ class Scheduler:
         timeline      = {i:[] for i in range(self.n + self.window.size + rw)}
         port_timeline = {port:[] for port in ports}
         cache_states = []
+        self.fill_buffer_snapshots = []
+        self.write_buffer_snapshots = []
         last_cache_state = None
         INSTR_Info    = []
         self.wait_details = []
@@ -303,7 +332,7 @@ class Scheduler:
             retires, used_ports, _,_,_,_ = self.next_cycle()
 
             if self.cache is not None:
-                cache_cycle = self.cycles - 1
+                cache_cycle = self.cycles
                 cache_state = self.cache.get_state(cache_cycle)
                 cache_signature = tuple(
                     (line["valid"], line["address"], line["dirty"], line["lru"],
@@ -316,6 +345,15 @@ class Scheduler:
                         "lines": cache_state,
                     })
                     last_cache_state = cache_signature
+                buffer_state = self.cache.get_buffer_state()
+                self.fill_buffer_snapshots.append({
+                    "cycle": cache_cycle,
+                    "slots": buffer_state["fill"],
+                })
+                self.write_buffer_snapshots.append({
+                    "cycle": cache_cycle,
+                    "slots": buffer_state["write"],
+                })
 
             for port, used in used_ports.items():
                 port_timeline[port].append(used)
@@ -332,7 +370,12 @@ class Scheduler:
                 last_ret_cycle  = self.cycles
                 exec_latency    = r_instr.exec_lat
 
-                INSTR_Info.append([r_instr.exec_cycle, r_instr.port_used, r_instr.memAddr])
+                INSTR_Info.append([
+                    r_instr.exec_cycle,
+                    r_instr.port_used,
+                    r_instr.memAddr,
+                    r_instr.port_uses,
+                ])
 
                 timeline[ dynamic_idx ].append((self.cycles, r_instr.state))
 
@@ -368,6 +411,31 @@ class Scheduler:
                             "instruction_index": instr.d_idx,
                             "reason": "issue-bandwidth",
                         })
+                    elif instr.state in (InstrState.LOAD, InstrState.STORE) and \
+                            instr.substate in (
+                                InstrState.WAIT_MM_REQUEST,
+                                InstrState.WAIT_MM_READY,
+                                InstrState.WAIT_DATA_READY,
+                                InstrState.WAIT_CACHE_2ND,
+                            ):
+                        self.wait_details.append({
+                            "cycle": self.cycles - 1,
+                            "instruction_index": instr.d_idx,
+                            "reason": "cache",
+                            "block_address": (
+                                instr.memAddr // self.blkSize
+                            ) * self.blkSize,
+                            "buffer_state": self.cache.get_request_state(instr.d_idx),
+                        })
+                    elif instr.substate == InstrState.WAIT_RETURN_QUEUE:
+                        self.wait_details.append({
+                            "cycle": self.cycles - 1,
+                            "instruction_index": instr.d_idx,
+                            "reason": "cache-return",
+                            "block_address": (
+                                instr.memAddr // self.blkSize
+                            ) * self.blkSize,
+                        })
                 else:
                     timeline[instr.d_idx].append((self.cycles, instr.state))
 
@@ -391,6 +459,9 @@ class Scheduler:
         self.retrWidth  = process.retire
         self.mPenalty   = process.mPenalty
         self.mIssueTime = process.mIssueTime
+        self.nFillBuffers = process.nFillBuffers
+        self.nWriteBuffers = process.nWriteBuffers
+        self.rThru = process.rThru
         self.sched      = process.sched
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
@@ -401,7 +472,10 @@ class Scheduler:
         if self.nBlocks > 0:
             self.cache  = Cache(
                 self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime,
-                record_requests=True
+                record_requests=True,
+                fill_buffer_count=self.nFillBuffers,
+                write_buffer_count=self.nWriteBuffers,
+                return_throughput=self.rThru,
             )
         else:
             self.cache = None
@@ -450,8 +524,17 @@ class Scheduler:
         timelineJson["critical_path_graph"] = ex.serialize_execution_graph(ExecGraph, self.n)
         timelineJson["wait_details"] = self.wait_details
         timelineJson["resource_usage"] = {
-            "ports": port_timeline
+            "ports": port_timeline,
+            "port_owners": {
+                str(port): [[] for _ in range(self.cycles)]
+                for port in ports
+            },
         }
+        for instruction_index, info in enumerate(INSTR_Info):
+            for cycle, port in info[3]:
+                timelineJson["resource_usage"]["port_owners"][str(port)][cycle].append(
+                    instruction_index
+                )
         if self.cache is not None:
             mm_usage = [False] * self.cycles
             for request in self.cache.MEM_requests:
@@ -464,6 +547,14 @@ class Scheduler:
             timelineJson["resource_usage"]["cache_state"] = {
                 "line_count": self.cache.CACHE_SIZE,
                 "snapshots": cache_states,
+            }
+            timelineJson["resource_usage"]["fill_buffers"] = {
+                "capacity": self.cache.FILL_BUFFER_COUNT,
+                "snapshots": self.fill_buffer_snapshots,
+            }
+            timelineJson["resource_usage"]["write_buffers"] = {
+                "capacity": self.cache.WRITE_BUFFER_COUNT,
+                "snapshots": self.write_buffer_snapshots,
             }
 
         return json.dumps(timelineJson)
@@ -481,6 +572,9 @@ class Scheduler:
         self.retrWidth  = process.retire
         self.mPenalty   = process.mPenalty
         self.mIssueTime = process.mIssueTime
+        self.nFillBuffers = process.nFillBuffers
+        self.nWriteBuffers = process.nWriteBuffers
+        self.rThru = process.rThru
         self.sched      = process.sched
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
@@ -488,7 +582,15 @@ class Scheduler:
         _program.assign_memory_addresses(process.Nloop)
         
         if self.nBlocks > 0:
-            self.cache  = Cache(self.nBlocks, self.blkSize, self.mPenalty, self.mIssueTime)
+            self.cache  = Cache(
+                self.nBlocks,
+                self.blkSize,
+                self.mPenalty,
+                self.mIssueTime,
+                fill_buffer_count=self.nFillBuffers,
+                write_buffer_count=self.nWriteBuffers,
+                return_throughput=self.rThru,
+            )
         else:
             self.cache = None
 

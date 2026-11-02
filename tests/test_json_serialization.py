@@ -5,6 +5,7 @@ import numpy as np
 
 from RVCAT.cache import Cache
 from RVCAT.exec_graph import serialize_execution_graph
+from RVCAT.program import Process
 from RVCAT.scheduler import Scheduler
 
 
@@ -19,6 +20,8 @@ def load_process():
         "blkSize": 16,
         "mPenalty": 1,
         "mIssueTime": 1,
+        "nFillBuffers": 2,
+        "nWriteBuffers": 2,
         "instruction_list": [
             {
                 "type": "MEM",
@@ -44,50 +47,191 @@ def load_process():
 
 class JsonSerializationTests(unittest.TestCase):
 
+    def test_process_rejects_miss_penalty_below_memory_issue_time(self):
+        process = load_process()
+        process["mPenalty"] = 1
+        process["mIssueTime"] = 2
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "mPenalty must be greater than or equal to mIssueTime",
+        ):
+            Process.from_json(process)
+
+    def test_return_throughput_defaults_to_one_and_rejects_invalid_values(self):
+        process = Process.from_json(load_process())
+        self.assertEqual(process.rThru, 1)
+        self.assertEqual(process.json()["rThru"], 1)
+
+        for invalid_value in (0, 33, True, 1.5):
+            with self.subTest(value=invalid_value):
+                invalid_process = load_process()
+                invalid_process["rThru"] = invalid_value
+                with self.assertRaisesRegex(ValueError, "rThru must be an integer"):
+                    Process.from_json(invalid_process)
+
     def test_secondary_cache_miss_latency_is_json_serializable(self):
-        cache = Cache(1, 16, MissLatency=10, MissIssueTime=4)
-        cache.access(0, 0, 0)
+        cache = Cache(1, 16, MissLatency=4, MissIssueTime=2, record_requests=True)
+        self.assertEqual(cache.request_access(0, 0, 0, 0), "miss")
+        self.assertEqual(cache.request_access(0, 0, 0, 1), "merged")
+        cache.advance(0)
+        self.assertEqual(len(cache.MEM_requests), 1)
+        self.assertEqual(cache.MEM_requests[0]["instruction_indices"], [0, 1])
+        self.assertEqual(cache.get_request_state(0), "reading")
+        self.assertEqual(cache.get_request_state(1), "reading")
+        cache.advance(4)
 
-        result, latency = cache.access(0, 0, 1)
+        self.assertEqual(cache.get_request_state(0), "returned")
+        self.assertEqual(cache.get_request_state(1), "return_queue")
+        self.assertTrue(cache.consume_completion(0))
+        cache.advance(5)
+        self.assertEqual(cache.get_request_state(1), "returned")
+        self.assertTrue(cache.consume_completion(1))
 
-        self.assertEqual(result, 2)
-        self.assertIs(type(latency), int)
-        self.assertEqual(json.dumps({"latency": latency}), '{"latency": 10}')
+    def test_cache_return_throughput_serves_waiters_in_age_order(self):
+        cache = Cache(
+            1, 16, MissLatency=4, MissIssueTime=2,
+            return_throughput=2,
+        )
+        cache.request_access(0, 0, 0, 3)
+        cache.request_access(0, 0, 0, 1)
+        cache.request_access(0, 0, 0, 2)
+        cache.advance(0)
+        cache.advance(4)
 
-    def test_cache_records_reserved_main_memory_request_cycles(self):
-        cache = Cache(1, 16, MissLatency=10, MissIssueTime=4, record_requests=True)
-        cache.access(1, 0, 1, 3)
-        cache.access(1, 16, 2, 4)
+        self.assertEqual(cache.returned_instructions, [1, 2])
+        self.assertEqual(cache.get_request_state(1), "returned")
+        self.assertEqual(cache.get_request_state(2), "returned")
+        self.assertEqual(cache.get_request_state(3), "return_queue")
+        self.assertTrue(cache.consume_completion(1))
+        self.assertTrue(cache.consume_completion(2))
+        cache.advance(5)
+        self.assertEqual(cache.returned_instructions, [3])
+
+    def test_cache_records_cycle_issued_read_and_dirty_writeback(self):
+        cache = Cache(1, 16, MissLatency=4, MissIssueTime=2, record_requests=True)
+        cache.request_access(1, 0, 0, 3)
+        cache.advance(0)
+        cache.advance(4)
+        cache.consume_completion(3)
+
+        cache.request_access(1, 16, 5, 4)
+        cache.advance(5)
 
         self.assertEqual(cache.MEM_requests, [
-            {"cycle": 1, "address": 0, "operation": "read_for_write", "instruction_index": 3, "duration": 4},
-            {"cycle": 5, "address": 16, "operation": "read_for_write", "instruction_index": 4, "duration": 4},
-            {"cycle": 9, "address": 0, "operation": "write", "instruction_index": 4, "duration": 4},
+            {"cycle": 0, "address": 0, "operation": "read_for_write",
+             "instruction_index": 3, "instruction_indices": [3], "duration": 2},
+            {"cycle": 5, "address": 0, "operation": "write",
+             "instruction_index": None, "instruction_indices": [], "duration": 2},
         ])
+
+    def test_fill_capacity_queues_misses_and_protects_a_completed_fill_for_one_cycle(self):
+        cache = Cache(
+            1, 8, MissLatency=4, MissIssueTime=2,
+            fill_buffer_count=1, write_buffer_count=1,
+        )
+        self.assertEqual(cache.request_access(0, 8, 0, 0), "miss")
+        self.assertEqual(cache.request_access(0, 16, 0, 1), "miss")
+        cache.advance(0)
+
+        self.assertEqual(len(cache.mshrs), 1)
+        self.assertEqual(cache.get_request_state(0), "reading")
+        self.assertEqual(cache.get_request_state(1), "queued_fill")
+        self.assertEqual(cache.get_buffer_state()["fill"][0]["address"], 8)
+
+        cache.advance(4)
+
+        self.assertEqual(cache.get_request_state(0), "returned")
+        self.assertEqual(cache.get_request_state(1), "queued_line")
+        self.assertEqual(cache.get_state(4)[0]["address"], 8)
+        self.assertFalse(cache.get_state(4)[0]["loading"])
+
+        cache.consume_completion(0)
+        cache.advance(5)
+        self.assertEqual(cache.get_request_state(1), "reading")
+        self.assertEqual(cache.get_state(5)[0]["address"], 16)
+
+    def test_miss_to_block_already_in_flight_joins_existing_mm_request(self):
+        cache = Cache(2, 8, MissLatency=4, MissIssueTime=2, record_requests=True)
+        cache.request_access(0, 8, 0, 0)
+        cache.advance(0)
+        self.assertEqual(cache.request_access(0, 8, 1, 1), "secondary")
+        cache.advance(1)
+
+        self.assertEqual(len(cache.MEM_requests), 1)
+        self.assertEqual(cache.MEM_requests[0]["instruction_indices"], [0, 1])
+        self.assertEqual(cache.get_buffer_state()["fill"][0]["instruction_indices"], [0, 1])
+
+    def test_timeline_limits_ordered_cache_returns_without_reissuing_loads(self):
+        process = load_process()
+        process.update({
+            "Nloop": 1,
+            "dispatch": 2,
+            "nBlocks": 2,
+            "blkSize": 4,
+            "mPenalty": 4,
+            "mIssueTime": 1,
+        })
+        process["instruction_list"][1]["source2"] = "A"
+
+        timeline = json.loads(Scheduler().get_timeline(process, nret=2))
+        first, second = timeline["instructions"]
+
+        self.assertIn("!", first[4])
+        self.assertIn("2", second[4])
+        self.assertIn("@", second[4])
+        self.assertTrue(any(
+            detail["reason"] == "cache-return"
+            and detail["instruction_index"] == 1
+            and detail["block_address"] == 0
+            for detail in timeline["wait_details"]
+        ))
+        self.assertEqual(len(timeline["resource_usage"]["mm_requests"]), 1)
+        self.assertEqual(
+            timeline["resource_usage"]["mm_requests"][0]["instruction_indices"],
+            [0, 1],
+        )
+        port_owners = timeline["resource_usage"]["port_owners"]["0"]
+        self.assertEqual(sum(0 in rows for rows in port_owners), 1)
+        self.assertEqual(sum(1 in rows for rows in port_owners), 1)
+        self.assertEqual(first[4].count("L"), 1)
+        self.assertEqual(second[4].count("L"), 1)
+        self.assertEqual(second[4].count("@"), 1)
 
     def test_cache_state_reports_block_address_dirty_bit_and_pending_fill(self):
         cache = Cache(2, 8, MissLatency=4, MissIssueTime=2)
 
         self.assertFalse(cache.get_state(0)[0]["valid"])
-        cache.access(1, 8, 0)
+        cache.request_access(1, 8, 0, 0)
+        cache.advance(0)
+        self.assertFalse(cache.consume_completion(0))
+        self.assertEqual(cache.get_request_state(0), "reading")
 
         loading_line = cache.get_state(0)[0]
         self.assertEqual(loading_line["address"], 8)
-        self.assertTrue(loading_line["dirty"])
+        self.assertFalse(loading_line["dirty"])
         self.assertIsInstance(loading_line["lru"], int)
         self.assertTrue(loading_line["loading"])
         self.assertEqual(loading_line["ready_cycle"], 4)
+        cache.advance(4)
         self.assertFalse(cache.get_state(4)[0]["loading"])
+        self.assertFalse(cache.get_state(4)[0]["dirty"])
+        self.assertTrue(cache.consume_completion(0))
+        self.assertTrue(cache.get_state(4)[0]["dirty"])
 
     def test_read_hit_preserves_dirty_bit_for_a_later_writeback(self):
         cache = Cache(1, 8, MissLatency=4, MissIssueTime=2, record_requests=True)
-        cache.access(1, 8, 0)
+        cache.request_access(1, 8, 0, 0)
+        cache.advance(0)
+        cache.advance(4)
+        cache.consume_completion(0)
 
-        result, _ = cache.access(0, 8, 4)
+        result = cache.request_access(0, 8, 4, 1)
 
-        self.assertEqual(result, 0)
+        self.assertEqual(result, "hit")
         self.assertTrue(cache.get_state(4)[0]["dirty"])
-        cache.access(0, 16, 5)
+        cache.request_access(0, 16, 5, 2)
+        cache.advance(5)
         self.assertTrue(any(
             request["operation"] == "write" and request["address"] == 8
             for request in cache.MEM_requests
@@ -95,7 +239,7 @@ class JsonSerializationTests(unittest.TestCase):
 
     def test_cache_does_not_record_requests_outside_timeline_generation(self):
         cache = Cache(1, 16, MissLatency=10, MissIssueTime=4)
-        cache.access(0, 0, 1)
+        cache.request_access(0, 0, 1, 0)
 
         self.assertEqual(cache.MEM_requests, [])
 
@@ -161,6 +305,16 @@ class JsonSerializationTests(unittest.TestCase):
             len(snapshot["lines"]) == cache_state["line_count"]
             for snapshot in cache_state["snapshots"]
         ))
+        self.assertEqual(resource_usage["fill_buffers"]["capacity"], 2)
+        self.assertEqual(resource_usage["write_buffers"]["capacity"], 2)
+        self.assertTrue(all(
+            len(snapshot["slots"]) == 2
+            for snapshot in resource_usage["fill_buffers"]["snapshots"]
+        ))
+        self.assertTrue(all(
+            len(snapshot["slots"]) == 2
+            for snapshot in resource_usage["write_buffers"]["snapshots"]
+        ))
         self.assertIn(
             40,
             [line["address"] for snapshot in cache_state["snapshots"]
@@ -169,13 +323,14 @@ class JsonSerializationTests(unittest.TestCase):
         self.assertTrue(all(
             isinstance(request["address"], int)
             and request["operation"] in {"read", "read_for_write", "write"}
-            and isinstance(request["instruction_index"], int)
-            and request["instruction_index"] < len(timeline["instructions"])
+            and all(index < len(timeline["instructions"])
+                    for index in request["instruction_indices"])
             for request in resource_usage["mm_requests"]
         ))
         self.assertTrue(all(
-            timeline["instructions"][request["instruction_index"]][6] == request["address"]
+            timeline["instructions"][index][6] == request["address"]
             for request in resource_usage["mm_requests"]
+            for index in request["instruction_indices"]
         ))
         for row in timeline["instructions"]:
             issue_offset = next(
@@ -208,7 +363,7 @@ class JsonSerializationTests(unittest.TestCase):
 
         self.assertIn(
             {"cycle": 2, "address": 0, "operation": "read_for_write",
-             "instruction_index": 0, "duration": 2},
+             "instruction_index": 0, "instruction_indices": [0], "duration": 2},
             requests,
         )
         self.assertTrue(any(
@@ -219,7 +374,56 @@ class JsonSerializationTests(unittest.TestCase):
             request["operation"] == "write" and request["address"] == 0
             for request in requests
         ))
+        dirty_write_cycle = next(
+            request["cycle"] for request in requests
+            if request["operation"] == "write" and request["address"] == 0
+        )
+        replacement_read_cycle = next(
+            request["cycle"] for request in requests
+            if request["operation"] == "read_for_write" and request["address"] == 40
+        )
+        self.assertLess(dirty_write_cycle, replacement_read_cycle)
         self.assertTrue(any(line["dirty"] for line in cache_lines))
+
+    def test_timeline_respects_configured_fill_and_write_buffer_capacities(self):
+        process = load_process()
+        process.update({
+            "nBlocks": 2,
+            "blkSize": 4,
+            "mPenalty": 4,
+            "mIssueTime": 2,
+            "nFillBuffers": 1,
+            "nWriteBuffers": 1,
+        })
+        for instruction in process["instruction_list"]:
+            instruction["oper"] = "STORE"
+
+        timeline = json.loads(Scheduler().get_timeline(process, nret=4))
+        resources = timeline["resource_usage"]
+
+        self.assertEqual(resources["fill_buffers"]["capacity"], 1)
+        self.assertEqual(resources["write_buffers"]["capacity"], 1)
+        self.assertTrue(all(
+            sum(slot["valid"] for slot in snapshot["slots"]) <= 1
+            for snapshot in resources["fill_buffers"]["snapshots"]
+        ))
+        self.assertTrue(all(
+            sum(slot["valid"] for slot in snapshot["slots"]) <= 1
+            for snapshot in resources["write_buffers"]["snapshots"]
+        ))
+        self.assertTrue(any(
+            slot["valid"]
+            for snapshot in resources["write_buffers"]["snapshots"]
+            for slot in snapshot["slots"]
+        ))
+        read_cycles = [
+            request["cycle"] for request in resources["mm_requests"]
+            if request["operation"] != "write"
+        ]
+        self.assertTrue(all(
+            later - earlier >= process["mIssueTime"]
+            for earlier, later in zip(read_cycles, read_cycles[1:])
+        ))
 
     def test_timeline_omits_main_memory_usage_without_cache(self):
         timeline = json.loads(Scheduler().get_timeline(load_process(), nret=2))
