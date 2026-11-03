@@ -1,0 +1,18 @@
+# Builds the "rvcat" wheel used by rvcat-web-ui (loaded in the browser by Pyodide).
+# The repository root is the package directory, so it is mapped to "rvcat".
+#
+#   python -m pip wheel . --no-deps -w dist
+#
+# Keep the version at 0.1: the web app loads the file "rvcat-0.1-py3-none-any.whl".
+
+[build-system]
+requires      = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name    = "rvcat"
+version = "0.1"
+
+[tool.setuptools]
+packages    = ["rvcat"]
+package-dir = { "rvcat" = "." }
