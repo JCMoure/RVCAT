@@ -22,9 +22,11 @@ of each cache line at the end of a cycle, including its block address, dirty bit
 LRU rank, and pending-fill ready cycle. `resource_usage.fill_buffers` and
 `resource_usage.write_buffers` contain cycle-by-cycle slot snapshots. Distinct misses
 are admitted in program age order while fill and write-buffer capacity is available;
-misses to the same block merge into one fill. A fill reserves a cache line until its
-MM read completes. A dirty victim is copied into a write buffer and written before
-the replacement block is fetched. Buffer capacities default to two and are configurable
+misses to the same block merge into one fill. A fill buffer stays occupied until the
+MM read completes and every waiting instruction receives its data through the return
+queue; its cache line may be replaced meanwhile because queued returns use the fill
+buffer. A dirty victim is copied into a write buffer and written before the replacement
+block is fetched. Buffer capacities default to two and are configurable
 with `nFillBuffers` and `nWriteBuffers` (1 to 32).
 Instructions that join a block already loading are marked as secondary misses.
 When the fill completes, waiting loads and stores enter an independent return
@@ -39,6 +41,13 @@ lists every outstanding producer in its `dependencies` array. The cache model do
 include a Load/Store Queue, memory-dependency tracking, or load/store bypass.
 `resource_usage.port_owners` lists dynamic instruction indices by port and cycle,
 including post-fill cache retries.
+
+`Scheduler.get_results()` preserves `read_misses` and `write_misses` as totals and
+also returns `read_primary_misses`, `read_secondary_misses`, `write_primary_misses`,
+and `write_secondary_misses`. `MM_Reads` counts actual Main Memory block-read transfers
+caused by cache misses, including STORE read-for-write fills; `MM_Writes` counts
+actual dirty-block writeback transfers. `MM_usage_percent` is the share of simulation
+cycles in which the Main Memory issue channel is reserved.
 
 The graph has this versioned shape:
 

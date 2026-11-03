@@ -46,19 +46,6 @@ class Scheduler:
         MMupdates   = []
         if self.cache is not None:
             MMupdates.extend(self.cache.advance(self.cycles))
-            returned_instructions = set(self.cache.returned_instructions)
-            for instr in self.window:
-                if instr.state in (InstrState.LOAD, InstrState.STORE) and \
-                        instr.substate in (
-                            InstrState.WAIT_MM_REQUEST,
-                            InstrState.WAIT_MM_READY,
-                            InstrState.WAIT_DATA_READY,
-                            InstrState.WAIT_CACHE_2ND,
-                            InstrState.WAIT_RETURN_QUEUE,
-                        ) and instr.d_idx in returned_instructions:
-                    self.cache.consume_completion(instr.d_idx)
-                    instr.state = InstrState.WRITE_BACK
-                    instr.substate = InstrState.NONE
 
         for window_idx in range(self.window.count):
 
@@ -587,6 +574,7 @@ class Scheduler:
                 self.blkSize,
                 self.mPenalty,
                 self.mIssueTime,
+                record_requests=True,
                 fill_buffer_count=self.nFillBuffers,
                 write_buffer_count=self.nWriteBuffers,
                 return_throughput=self.rThru,
@@ -603,7 +591,10 @@ class Scheduler:
         retired         = 0
         last_ret_cycle  = 0
         last_disp_cycle = 0
-        MM_writes, Reads, RdMisses, Writes, WrMisses, S2Misses = 0, 0, 0, 0, 0, 0
+        Reads, Writes = 0, 0
+        RdMisses, WrMisses, S2Misses = 0, 0, 0
+        RdPrimaryMisses, RdSecondaryMisses = 0, 0
+        WrPrimaryMisses, WrSecondaryMisses = 0, 0
 
         all_ports = 0
         for instr in _program.instruction_list:
@@ -619,18 +610,23 @@ class Scheduler:
 
         while retired < self.n:
             retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates = self.next_cycle()
+            secondary_misses = set(SecondMisses)
 
             for idx in ReadMisses:
                 if idx < self.n:
                     RdMisses += 1
+                    if idx in secondary_misses:
+                        RdSecondaryMisses += 1
+                    else:
+                        RdPrimaryMisses += 1
 
             for idx in WriteMisses:
                 if idx < self.n:
                     WrMisses += 1
-
-            for idx in MMupdates:
-                if idx < self.n:
-                    MM_writes += 1
+                    if idx in secondary_misses:
+                        WrSecondaryMisses += 1
+                    else:
+                        WrPrimaryMisses += 1
 
             for idx in SecondMisses:
                 if idx < self.n:
@@ -681,13 +677,28 @@ class Scheduler:
            usage = port_usage[port]/self.cycles
            out["ports"][str(port)] = usage*100
 
+        mm_requests = self.cache.MEM_requests if self.cache is not None else []
+        mm_reads = sum(request["operation"] != "write" for request in mm_requests)
+        mm_writes = sum(request["operation"] == "write" for request in mm_requests)
+        mm_busy_cycles = {
+            cycle
+            for request in mm_requests
+            for cycle in range(request["cycle"], request["cycle"] + request["duration"])
+            if 0 <= cycle < self.cycles
+        }
+
         out["reads"]          = Reads
         out["read_misses"]    = RdMisses
+        out["read_primary_misses"] = RdPrimaryMisses
+        out["read_secondary_misses"] = RdSecondaryMisses
         out["writes"]         = Writes
         out["write_misses"]   = WrMisses
+        out["write_primary_misses"] = WrPrimaryMisses
+        out["write_secondary_misses"] = WrSecondaryMisses
         out["second_misses"]  = S2Misses
-        out["MM_Reads"]       = RdMisses+WrMisses
-        out["MM_Writes"]      = MM_writes
+        out["MM_Reads"]       = mm_reads
+        out["MM_Writes"]      = mm_writes
+        out["MM_usage_percent"] = 100 * len(mm_busy_cycles) / self.cycles
 
         out["critical_path"]   = ex.critical_path_statistics_json(
             self.num_instr, _program.instruction_list, critical_path, self.iterations

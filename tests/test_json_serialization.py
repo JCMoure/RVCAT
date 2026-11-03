@@ -58,6 +58,75 @@ class JsonSerializationTests(unittest.TestCase):
         ):
             Process.from_json(process)
 
+    def test_simulation_results_separate_read_miss_types_and_count_mm_transfers(self):
+        process = load_process()
+        process.update({
+            "Nloop": 1,
+            "nBlocks": 1,
+            "blkSize": 8,
+            "mPenalty": 4,
+            "mIssueTime": 1,
+        })
+        process["instruction_list"][1]["source2"] = "A"
+
+        results = json.loads(Scheduler().get_results(process, niters=1))
+
+        self.assertEqual(results["read_misses"], 2)
+        self.assertEqual(results["read_primary_misses"], 1)
+        self.assertEqual(results["read_secondary_misses"], 1)
+        self.assertEqual(results["write_misses"], 0)
+        self.assertEqual(results["MM_Reads"], 1)
+        self.assertEqual(results["MM_Writes"], 0)
+        self.assertAlmostEqual(
+            results["MM_usage_percent"],
+            100 / results["total_cycles"],
+        )
+
+    def test_simulation_counts_dirty_block_writebacks_as_mm_writes(self):
+        process = load_process()
+        process.update({
+            "Nloop": 1,
+            "nBlocks": 1,
+            "blkSize": 4,
+            "mPenalty": 4,
+            "mIssueTime": 1,
+        })
+        for instruction in process["instruction_list"]:
+            instruction["oper"] = "STORE"
+
+        results = json.loads(Scheduler().get_results(process, niters=1))
+
+        self.assertEqual(results["write_misses"], 2)
+        self.assertEqual(results["write_primary_misses"], 2)
+        self.assertEqual(results["write_secondary_misses"], 0)
+        self.assertEqual(results["MM_Reads"], 2)
+        self.assertEqual(results["MM_Writes"], 1)
+        self.assertAlmostEqual(
+            results["MM_usage_percent"],
+            300 / results["total_cycles"],
+        )
+
+    def test_simulation_splits_secondary_store_misses(self):
+        process = load_process()
+        process.update({
+            "Nloop": 1,
+            "nBlocks": 1,
+            "blkSize": 8,
+            "mPenalty": 4,
+            "mIssueTime": 1,
+        })
+        process["instruction_list"][0]["oper"] = "STORE"
+        process["instruction_list"][1]["oper"] = "STORE"
+        process["instruction_list"][1]["source2"] = "A"
+
+        results = json.loads(Scheduler().get_results(process, niters=1))
+
+        self.assertEqual(results["write_misses"], 2)
+        self.assertEqual(results["write_primary_misses"], 1)
+        self.assertEqual(results["write_secondary_misses"], 1)
+        self.assertEqual(results["MM_Reads"], 1)
+        self.assertEqual(results["MM_Writes"], 0)
+
     def test_return_throughput_defaults_to_one_and_rejects_invalid_values(self):
         process = Process.from_json(load_process())
         self.assertEqual(process.rThru, 1)
@@ -83,10 +152,18 @@ class JsonSerializationTests(unittest.TestCase):
 
         self.assertEqual(cache.get_request_state(0), "returned")
         self.assertEqual(cache.get_request_state(1), "return_queue")
+        return_fill = cache.get_buffer_state()["fill"][0]
+        self.assertTrue(return_fill["valid"])
+        self.assertEqual(return_fill["state"], "returning")
+        self.assertEqual(return_fill["instruction_indices"], [0, 1])
         self.assertTrue(cache.consume_completion(0))
+        self.assertEqual(
+            cache.get_buffer_state()["fill"][0]["instruction_indices"], [1]
+        )
         cache.advance(5)
         self.assertEqual(cache.get_request_state(1), "returned")
         self.assertTrue(cache.consume_completion(1))
+        self.assertFalse(cache.get_buffer_state()["fill"][0]["valid"])
 
     def test_cache_return_throughput_serves_waiters_in_age_order(self):
         cache = Cache(
@@ -142,14 +219,64 @@ class JsonSerializationTests(unittest.TestCase):
         cache.advance(4)
 
         self.assertEqual(cache.get_request_state(0), "returned")
-        self.assertEqual(cache.get_request_state(1), "queued_line")
+        self.assertEqual(cache.get_request_state(1), "queued_fill")
         self.assertEqual(cache.get_state(4)[0]["address"], 8)
         self.assertFalse(cache.get_state(4)[0]["loading"])
+        return_fill = cache.get_buffer_state()["fill"][0]
+        self.assertTrue(return_fill["valid"])
+        self.assertEqual(return_fill["address"], 8)
+        self.assertEqual(return_fill["state"], "returning")
 
         cache.consume_completion(0)
+        self.assertFalse(cache.get_buffer_state()["fill"][0]["valid"])
         cache.advance(5)
         self.assertEqual(cache.get_request_state(1), "reading")
         self.assertEqual(cache.get_state(5)[0]["address"], 16)
+
+    def test_fill_buffer_returns_data_after_cache_line_is_replaced(self):
+        cache = Cache(
+            1, 8, MissLatency=4, MissIssueTime=1,
+            fill_buffer_count=2, return_throughput=1,
+        )
+        cache.request_access(0, 8, 0, 0)
+        cache.request_access(0, 16, 0, 1)
+        cache.advance(0)
+        cache.advance(4)
+        cache.advance(5)
+
+        self.assertEqual(cache.get_request_state(0), "returned")
+        self.assertEqual(cache.get_state(5)[0]["address"], 16)
+        returning_fill = next(
+            slot for slot in cache.get_buffer_state()["fill"] if slot["address"] == 8
+        )
+        self.assertEqual(returning_fill["state"], "returning")
+        self.assertTrue(cache.consume_completion(0))
+        self.assertFalse(any(
+            slot["valid"] and slot["address"] == 8
+            for slot in cache.get_buffer_state()["fill"]
+        ))
+
+    def test_pending_store_remains_dirty_if_its_cache_line_is_replaced(self):
+        cache = Cache(
+            1, 8, MissLatency=4, MissIssueTime=1,
+            fill_buffer_count=2, write_buffer_count=1, return_throughput=1,
+            record_requests=True,
+        )
+        cache.request_access(0, 8, 0, 0)
+        cache.request_access(1, 8, 0, 1)
+        cache.request_access(0, 16, 0, 2)
+        cache.advance(0)
+        cache.advance(4)
+        self.assertTrue(cache.consume_completion(0))
+        cache.advance(5)
+
+        self.assertEqual(cache.get_request_state(1), "returned")
+        self.assertEqual(cache.get_request_state(2), "waiting_writeback")
+        self.assertTrue(any(
+            request["operation"] == "write" and request["address"] == 8
+            for request in cache.MEM_requests
+        ))
+        self.assertTrue(cache.consume_completion(1))
 
     def test_miss_to_block_already_in_flight_joins_existing_mm_request(self):
         cache = Cache(2, 8, MissLatency=4, MissIssueTime=2, record_requests=True)
@@ -180,6 +307,15 @@ class JsonSerializationTests(unittest.TestCase):
         self.assertIn("!", first[4])
         self.assertIn("2", second[4])
         self.assertIn("@", second[4])
+        self.assertIn("W", first[4])
+        self.assertIn("W", second[4])
+        self.assertTrue(any(
+            slot["valid"]
+            and slot["state"] == "returning"
+            and slot["instruction_indices"] == [1]
+            for snapshot in timeline["resource_usage"]["fill_buffers"]["snapshots"]
+            for slot in snapshot["slots"]
+        ))
         self.assertTrue(any(
             detail["reason"] == "cache-return"
             and detail["instruction_index"] == 1
@@ -215,7 +351,7 @@ class JsonSerializationTests(unittest.TestCase):
         self.assertEqual(loading_line["ready_cycle"], 4)
         cache.advance(4)
         self.assertFalse(cache.get_state(4)[0]["loading"])
-        self.assertFalse(cache.get_state(4)[0]["dirty"])
+        self.assertTrue(cache.get_state(4)[0]["dirty"])
         self.assertTrue(cache.consume_completion(0))
         self.assertTrue(cache.get_state(4)[0]["dirty"])
 
@@ -354,6 +490,9 @@ class JsonSerializationTests(unittest.TestCase):
 
         timeline = json.loads(Scheduler().get_timeline(process, nret=4))
         requests = timeline["resource_usage"]["mm_requests"]
+        store_rows = [
+            row for row in timeline["instructions"] if "S" in row[4]
+        ]
         cache_lines = [
             line
             for snapshot in timeline["resource_usage"]["cache_state"]["snapshots"]
@@ -361,6 +500,8 @@ class JsonSerializationTests(unittest.TestCase):
             if line["valid"]
         ]
 
+        self.assertTrue(store_rows)
+        self.assertTrue(all("W" in row[4] for row in store_rows))
         self.assertIn(
             {"cycle": 2, "address": 0, "operation": "read_for_write",
              "instruction_index": 0, "instruction_indices": [0], "duration": 2},

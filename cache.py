@@ -41,7 +41,7 @@ class Cache:
     self.instruction_requests = {}
     self.fill_buffer_slots = {}
     self.write_buffer_slots = {}
-    self.return_waiters_by_line = {}
+    self.return_waiters = {}
     self.return_queue = []
     self.returned_instructions = []
     self.last_advance_cycle = None
@@ -70,7 +70,6 @@ class Cache:
 
   def _line_for_miss(self):
     reserved_lines = {entry["line"] for entry in self.mshrs.values()}
-    reserved_lines.update(self.return_waiters_by_line)
     candidates = [
       line for line in range(self.CACHE_SIZE)
       if line not in reserved_lines and line not in self.protected_lines_this_cycle
@@ -156,7 +155,7 @@ class Cache:
       (miss for miss in self.pending_misses if miss["block"] == block),
       None,
     )
-    if entry is None or len(self.mshrs) >= self.FILL_BUFFER_COUNT:
+    if entry is None or len(self.fill_buffer_slots) >= self.FILL_BUFFER_COUNT:
       return "queued_fill"
     line = self._line_for_miss()
     if line is None:
@@ -175,15 +174,16 @@ class Cache:
     if line >= 0:
       if request["access_type"] == 1:
         self.MODIFIED[line] = 1
-      waiters = self.return_waiters_by_line.get(line)
-      if waiters is not None:
-        waiters.discard(instruction_index)
-        if not waiters:
-          self.return_waiters_by_line.pop(line)
+    return_fill = self.return_waiters.get(request["block"])
+    if return_fill is not None:
+      return_fill["instruction_indices"].discard(instruction_index)
+      if not return_fill["instruction_indices"]:
+        self.return_waiters.pop(request["block"])
+        self.fill_buffer_slots.pop(request["block"])
     return True
 
   def _admit_pending_misses(self, cycle, writebacks):
-    while self.pending_misses and len(self.mshrs) < self.FILL_BUFFER_COUNT:
+    while self.pending_misses and len(self.fill_buffer_slots) < self.FILL_BUFFER_COUNT:
       entry = self.pending_misses[0]
       line = self._line_for_miss()
       if line is None:
@@ -274,6 +274,8 @@ class Cache:
       self.protected_lines_this_cycle.add(line)
       self.LOADING[line] = False
       self.READY_CYCLE[line] = entry["ready_cycle"]
+      if any(waiter["access_type"] == 1 for waiter in entry["waiters"]):
+        self.MODIFIED[line] = 1
       for waiter in entry["waiters"]:
         instruction_index = waiter["instruction_index"]
         self.instruction_requests[instruction_index]["state"] = "return_queue"
@@ -282,9 +284,12 @@ class Cache:
           "block": entry["block"],
           "access_type": waiter["access_type"],
         })
-        self.return_waiters_by_line.setdefault(line, set()).add(instruction_index)
+      self.return_waiters[entry["block"]] = {
+        "instruction_indices": {
+          waiter["instruction_index"] for waiter in entry["waiters"]
+        },
+      }
       self.mshrs.pop(entry["block"])
-      self.fill_buffer_slots.pop(entry["block"], None)
 
     if cycle != self.last_return_cycle:
       self.last_return_cycle = cycle
@@ -355,17 +360,28 @@ class Cache:
 
   def get_buffer_state(self):
     fills = [{"slot": slot, "valid": False} for slot in range(self.FILL_BUFFER_COUNT)]
-    for block, entry in self.mshrs.items():
-      slot = self.fill_buffer_slots[block]
+    for block, slot in self.fill_buffer_slots.items():
+      entry = self.mshrs.get(block)
+      return_fill = self.return_waiters.get(block)
+      if entry is not None:
+        state = entry["state"]
+        address = int(entry["address"])
+        ready_cycle = entry.get("ready_cycle")
+        instruction_indices = [
+          waiter["instruction_index"] for waiter in entry["waiters"]
+        ]
+      else:
+        state = "returning"
+        address = block * self.BLOCK_SIZE
+        ready_cycle = None
+        instruction_indices = sorted(return_fill["instruction_indices"])
       fills[slot] = {
         "slot": slot,
         "valid": True,
-        "address": int(entry["address"]),
-        "state": entry["state"],
-        "ready_cycle": entry.get("ready_cycle"),
-        "instruction_indices": [
-          waiter["instruction_index"] for waiter in entry["waiters"]
-        ],
+        "address": address,
+        "state": state,
+        "ready_cycle": ready_cycle,
+        "instruction_indices": instruction_indices,
       }
 
     writes = [{"slot": slot, "valid": False} for slot in range(self.WRITE_BUFFER_COUNT)]
