@@ -1,5 +1,4 @@
 from array import array
-from math import inf
 
 
 class CompactExecutionGraph:
@@ -34,15 +33,22 @@ class CompactExecutionGraph:
 
 
 def old_priority(isps):
-      _ais    = [inf]               # assigned instructions
-      _aps    = [-1]                # assigned ports
+      # Optimal port assignment of one cycle: isps = {window index: [ports it can use]}.
+      # Each instruction uses its port for one cycle, so the best assignment of each cycle is
+      # the one that issues the most instructions; among those, the oldest ones (smallest
+      # window indexes). Returns {window index: port}.
+      _ais    = None                # assigned instructions of the best assignment
+      _aps    = None                # assigned ports
       nis     = len(isps)           # number of instructions
       isps_is = sorted(isps.keys()) # instructions indexes
 
       def dfs(n=0, ais=[], aps=[]):
           if n == nis:
                 nonlocal _ais, _aps
-                if len(ais) >= len(_ais) and sum(ais) < sum(_ais):
+                # first more instructions, then older ones (a larger assignment is better
+                # even if the sum of its indexes is larger)
+                if _ais is None or len(ais) > len(_ais) or \
+                   (len(ais) == len(_ais) and sum(ais) < sum(_ais)):
                     _ais = ais
                     _aps = aps
                 return
@@ -58,7 +64,7 @@ def old_priority(isps):
                 dfs(n+1, ais, aps)
 
       dfs()
-      return dict(zip(_ais, _aps))
+      return dict(zip(_ais or [], _aps or []))
 
 def generate_execution_graph (static_instructions, N, window_size, DepEdges):
 
