@@ -293,7 +293,11 @@ class Program:
         self.inst_cyclic = list(set(Insts))  
         # list of inst_ids in cyclic paths (only once)
 
-        # get list of array variables in program order
+        self.collect_arrays()
+
+    def collect_arrays(self) -> None:
+        # get list of array variables in program order, and the loop stride (BRANCH stride)
+        self.loop_stride = 1
         Arrays = []
         for inst in self.instruction_list:
             if inst.type == "MEM" or inst.type == "VMEM":
@@ -341,6 +345,43 @@ class Program:
 
             self.array_addrs.append([init_addr, dataSize, array_size])
             init_addr += array_size  # assign next array to the next free address after current array
+
+    def get_memory_trace(self, programJSON, N: int, K: int = 4) -> str:
+        # Memory addresses accessed by the program during the first K and the last K loop
+        # iterations, with the same model used by the simulator (assign_memory_addresses and
+        # the per-iteration increment of the scheduler). N = algorithmic operations; the loop
+        # runs N // S iterations (S = loop stride). Uses its own Program object, so the state
+        # of the loaded program is not modified.
+        #   arrays:   [{name, base, elem_size, bytes}]          (program order)
+        #   accesses: [{index, array, oper, size, lanes, stride, constant,
+        #               addr: [...], elem: [...]}]            (one value per shown iteration)
+        prog = Program()
+        prog.instruction_list = [Instruction.from_json(d) for d in programJSON.get("instruction_list", [])]
+        prog.n = len(prog.instruction_list)
+        prog.collect_arrays()
+        S = prog.loop_stride
+        N = max(S, N - N % S)
+        prog.assign_memory_addresses(N)
+        iterations = N // S
+        K = max(1, K)
+        shown = sorted(set(range(min(K, iterations))) | set(range(max(0, iterations - K), iterations)))
+
+        arrays = [{"name": name, "base": base, "elem_size": size, "bytes": total}
+                  for name, (base, size, total) in zip(prog.arrays, prog.array_addrs)]
+        accesses = []
+        for index, inst in enumerate(prog.instruction_list):
+            if inst.type not in ("MEM", "VMEM") or inst.source2 not in prog.arrays:
+                continue
+            base     = prog.array_addrs[prog.arrays.index(inst.source2)][0]
+            dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
+            addrs    = [inst.addr + k * inst.byte_stride for k in shown]
+            accesses.append({
+                "index": index, "array": inst.source2, "oper": inst.oper, "size": dataSize,
+                "lanes": inst.lanes, "stride": inst.stride, "constant": inst.constant,
+                "addr": addrs, "elem": [(a - base) // dataSize for a in addrs]})
+
+        return json.dumps({"N": N, "S": S, "iterations": iterations, "shown": shown,
+                           "arrays": arrays, "accesses": accesses})
             
     def generate_dependence_info (self) -> None:
 
