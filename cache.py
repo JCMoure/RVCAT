@@ -93,6 +93,8 @@ class Cache:
     block_address = block * self.BLOCK_SIZE
     line = self.search(block)
 
+    # access_type: 0 load, 1 store, 2 store of a wrong (speculative) path: it requests the
+    # block for ownership (RFO) like a store, but never writes it (not marked dirty)
     if line >= 0 and not self.LOADING[line]:
       if access_type == 1:
         self.MODIFIED[line] = 1
@@ -164,6 +166,17 @@ class Cache:
             len(self.write_buffers) >= self.WRITE_BUFFER_COUNT:
       return "queued_write"
     return "queued_fill"
+
+  def cancel(self, instruction_index):
+    # The instruction was squashed (wrong path): its access in flight finishes and installs the
+    # block, but nobody waits for it, so its completion is consumed automatically.
+    request = self.instruction_requests.get(instruction_index)
+    if request is None:
+      return
+    if request["state"] == "returned":
+      self.consume_completion(instruction_index)
+    else:
+      request["orphan"] = True
 
   def consume_completion(self, instruction_index):
     request = self.instruction_requests.get(instruction_index)
@@ -299,6 +312,10 @@ class Cache:
         self.instruction_requests[instruction_index]["state"] = "returned"
         self.returned_instructions.append(instruction_index)
       del self.return_queue[:self.RETURN_THROUGHPUT]
+      orphans = [idx for idx in self.returned_instructions
+                 if self.instruction_requests.get(idx, {}).get("orphan")]
+      for idx in orphans:
+        self.consume_completion(idx)
 
     self._admit_pending_misses(cycle, writebacks)
 

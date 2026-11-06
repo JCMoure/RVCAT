@@ -2,6 +2,15 @@ import json
 
 global _program
 
+def _fraction(value, default):
+    # number in [0, 1], or default when missing or invalid
+    try:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return default
+        return min(1.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return default
+
 class Instruction:
 
     def __init__(self) -> None:
@@ -20,6 +29,8 @@ class Instruction:
         self.ports    = 0
         self.addr     = 0    # value initialized when program is loaded
         self.byte_stride = 4 # value initialized when program is loaded
+        self.prob     = 0.5  # conditional branch ("if c skip k"): probability of being taken
+        self.mispredict = None # conditional branch: misprediction rate (None: 2-bit predictor)
 
     def from_json(data: dict):
         instr = Instruction()
@@ -36,6 +47,8 @@ class Instruction:
         instr.stride     = data.get("stride", 1)
         instr.addr       = data.get("addr", 0)
         instr.byte_stride= data.get("byte_stride", 4)
+        instr.prob       = _fraction(data.get("prob"), 0.5)
+        instr.mispredict = _fraction(data.get("mispredict"), None)
         instr.latency    = data.get("latency", 0)
         instr.ports      = data.get("ports", 0)
         return instr
@@ -56,7 +69,9 @@ class Instruction:
             "latency":  self.latency,
             "ports":    self.ports,
             "addr":     self.addr,
-            "byte_stride": self.byte_stride
+            "byte_stride": self.byte_stride,
+            "prob":     self.prob,
+            "mispredict": self.mispredict
         }
     
 class Process:
@@ -75,6 +90,8 @@ class Process:
         self.nFillBuffers = 2   # maximum number of concurrent cache-block fills
         self.nWriteBuffers = 2 # maximum number of pending dirty-block writebacks
         self.rThru = 1          # maximum number of returned memory instructions per cycle
+        self.bPenalty = 5       # cycles to refill the front-end after a mispredicted branch resolves
+        self.speculation = "stall"  # simulation option: "stall" or "wrong-path" after a misprediction
         self.instruction_list = []      # list of instructions in the program (in program order)
         
     def from_json(data: dict):
@@ -92,6 +109,13 @@ class Process:
         process.nFillBuffers     = data.get("nFillBuffers", 2)
         process.nWriteBuffers    = data.get("nWriteBuffers", 2)
         process.rThru            = data.get("rThru", 1)
+        process.bPenalty         = data.get("bPenalty", 5)
+        process.speculation      = data.get("speculation", "stall")
+        if process.speculation not in ("stall", "wrong-path"):
+            raise ValueError("speculation must be 'stall' or 'wrong-path'.")
+        if isinstance(process.bPenalty, bool) or not isinstance(process.bPenalty, int) or \
+                not 0 <= process.bPenalty <= 99:
+            raise ValueError("bPenalty must be an integer between 0 and 99.")
         if process.mPenalty < process.mIssueTime:
             raise ValueError("mPenalty must be greater than or equal to mIssueTime.")
         if isinstance(process.rThru, bool) or not isinstance(process.rThru, int) or \
@@ -115,6 +139,8 @@ class Process:
             "nFillBuffers":     self.nFillBuffers,
             "nWriteBuffers":    self.nWriteBuffers,
             "rThru":            self.rThru,
+            "bPenalty":         self.bPenalty,
+            "speculation":      self.speculation,
             "instruction_list": self.instruction_list
         }
 
@@ -295,6 +321,117 @@ class Program:
 
         self.collect_arrays()
 
+    # ------------------------------------------------------------------------------------------
+    # Conditional forward branches inside the loop body: "if c skip k" (type BRANCH, constant k)
+    # ------------------------------------------------------------------------------------------
+    def conditional_branches(self):
+        # [(index, k)]: the branch at index skips the next k instructions when it is taken
+        out = []
+        for i, inst in enumerate(self.instruction_list[:-1]):
+            if inst.type == "BRANCH":
+                try:
+                    k = int(str(inst.constant).strip() or 1)
+                except ValueError:
+                    k = 1
+                out.append((i, max(1, min(k, self.n - 2 - i))))
+        return out
+
+    def execution_paths(self, max_paths=4096):
+        # Paths of one iteration: [(probability, [executed instruction indices])]
+        skips = dict(self.conditional_branches())
+        paths = []
+
+        def walk(i, prob, executed):
+            if len(paths) >= max_paths:
+                return
+            while i < self.n:
+                executed = executed + [i]
+                if i in skips:
+                    p = self.instruction_list[i].prob
+                    if p > 0:
+                        walk(i + 1 + skips[i], prob * p, executed)
+                    if p < 1:
+                        walk(i + 1, prob * (1 - p), executed)
+                    return
+                i += 1
+            paths.append((prob, executed))
+
+        walk(0, 1.0, [])
+        return paths
+
+    def execution_probabilities(self):
+        # probability that each instruction is executed in an iteration
+        probs = [0.0] * self.n
+        for prob, executed in self.execution_paths():
+            for i in executed:
+                probs[i] += prob
+        return probs
+
+    def _written_variables(self):
+        return {inst.destin for inst in self.instruction_list if inst.destin}
+
+    def read_variables(self, i):
+        # variables read by instruction i that some instruction writes (data dependences)
+        written = self._written_variables()
+        inst = self.instruction_list[i]
+        out = []
+        for v in (inst.source1, inst.source2, inst.source3):
+            if v and v in written and v not in out:
+                out.append(v)
+        return out
+
+    def producer_alternatives(self, max_distance=3):
+        # {(consumer, variable): [(producer, iteration distance, probability)]}
+        # A consumer may have several producers when a conditional block can skip them.
+        paths = self.execution_paths()
+        written = self._written_variables()
+        # last writer of each variable in a whole iteration: {var: {producer or None: prob}}
+        last_in_iter = {v: {} for v in written}
+        for prob, executed in paths:
+            for v in written:
+                w = next((i for i in reversed(executed) if self.instruction_list[i].destin == v), None)
+                last_in_iter[v][w] = last_in_iter[v].get(w, 0.0) + prob
+        alternatives = {}
+        for j in range(self.n):
+            for v in self.read_variables(j):
+                dist = {}
+                none_mass = 0.0
+                for prob, executed in paths:
+                    if j not in executed:
+                        continue
+                    before = executed[:executed.index(j)]
+                    w = next((i for i in reversed(before) if self.instruction_list[i].destin == v), None)
+                    if w is None:
+                        none_mass += prob
+                    else:
+                        dist[(w, 0)] = dist.get((w, 0), 0.0) + prob
+                for d in range(1, max_distance + 1):
+                    if none_mass <= 1e-12:
+                        break
+                    for w, pw in last_in_iter[v].items():
+                        if w is not None:
+                            dist[(w, d)] = dist.get((w, d), 0.0) + none_mass * pw
+                    none_mass *= last_in_iter[v].get(None, 0.0)
+                total = sum(dist.values())
+                if total > 0:
+                    alternatives[(j, v)] = sorted(((w, d, p / total) for (w, d), p in dist.items()),
+                                                  key=lambda x: (x[1], -x[0]))
+        return alternatives
+
+    @staticmethod
+    def predictor_misprediction_rate(p, samples=20000, seed=12345):
+        # misprediction rate of a 2-bit saturating counter when the branch is taken with
+        # probability p, independently in each execution
+        import random
+        rng = random.Random(seed)
+        counter, misses = 1, 0
+        for _ in range(samples):
+            taken = rng.random() < p
+            if (counter >= 2) != taken:
+                misses += 1
+            counter = min(3, counter + 1) if taken else max(0, counter - 1)
+        return misses / samples
+
     def collect_arrays(self) -> None:
         # get list of array variables in program order, and the loop stride (BRANCH stride)
         self.loop_stride = 1
@@ -369,6 +506,7 @@ class Program:
         arrays = [{"name": name, "base": base, "elem_size": size, "bytes": total}
                   for name, (base, size, total) in zip(prog.arrays, prog.array_addrs)]
         accesses = []
+        exec_probs = prog.execution_probabilities() if prog.conditional_branches() else [1.0] * prog.n
         for index, inst in enumerate(prog.instruction_list):
             if inst.type not in ("MEM", "VMEM") or inst.source2 not in prog.arrays:
                 continue
@@ -378,7 +516,8 @@ class Program:
             accesses.append({
                 "index": index, "array": inst.source2, "oper": inst.oper, "size": dataSize,
                 "lanes": inst.lanes, "stride": inst.stride, "constant": inst.constant,
-                "addr": addrs, "elem": [(a - base) // dataSize for a in addrs]})
+                "addr": addrs, "elem": [(a - base) // dataSize for a in addrs],
+                "exec_prob": exec_probs[index]})
 
         return json.dumps({"N": N, "S": S, "iterations": iterations, "shown": shown,
                            "arrays": arrays, "accesses": accesses})
@@ -486,6 +625,13 @@ class Program:
 
         self.load_instruction_list(instrs)
 
+        # conditional branches: dashed conditional instructions, one edge per possible producer
+        # (labeled with its probability) and dotted control edges (not data dependences)
+        branches     = self.conditional_branches()
+        alternatives = self.producer_alternatives() if branches else {}
+        exec_probs   = self.execution_probabilities() if branches else None
+        conditional  = {j for i, k in branches for j in range(i + 1, i + 1 + k)}
+
         recurrent_paths = self.cyclic_paths
 
         # max_latency    = maximum latency per iteration
@@ -511,10 +657,14 @@ class Program:
                   lat = self.instruction_list[inst_id].latency
                   txt = escape_html(self.instruction_list[inst_id].text)
                   out += f"  i{iter_id}s{inst_id} ["
+                  if inst_id in conditional:
+                    out += "style=\"filled,dashed\", "
                   out +=  "label=<<B>"
                   if show_latency:
                     out += f"<FONT COLOR=\"red\">({lat})</FONT> "
                   out += f"{inst_id}"
+                  if inst_id in conditional:
+                    out += f" <FONT COLOR=\"gray30\">[p={exec_probs[inst_id]:.2f}]</FONT>"
                   if show_small:
                     out += f"</B>>, tooltip=\"{txt}\"];\n"
                   else:
@@ -623,6 +773,28 @@ class Program:
                 continue
 
               # inst_id depends on "normal" variable
+              alts = alternatives.get((inst_id, self.variables[var])) if alternatives else None
+              if alts:
+                  name = self.variables[var]
+                  for (w, d, prob) in alts:
+                      src_iter = iter_id - d
+                      if src_iter >= 1:
+                          src = f"i{src_iter}s{w}"
+                      else:
+                          lc = next((n for n, (_, lc_var) in enumerate(self.loop_carried) if lc_var == name), None)
+                          if lc is None:
+                              continue
+                          src = f"LoopCar{lc}"
+                      recurrent = inst_id in self.inst_cyclic and w in self.inst_cyclic
+                      if not (recurrent or show_internal):
+                          continue
+                      certain = prob >= 0.995
+                      text  = "" if show_small and certain else (name if certain else f"{name} {prob:.2f}")
+                      style = ("color=red, penwidth=2.0, " if recurrent else "") + ("" if certain else "style=dashed, ")
+                      before = "" if d == 0 else f" of {d} iteration(s) before"
+                      out += f"  {src} -> i{iter_id}s{inst_id} [label=\"{text}\", {style}"
+                      out += f"tooltip=\"{name}: produced by instruction {w}{before} with probability {prob:.2f}\"];\n"
+                  continue
               # Check if current dependence is a part of a cyclical path
               in_cyclic   = inst_id in self.inst_cyclic
               out_cyclic  = i_id    in self.inst_cyclic 
@@ -664,6 +836,16 @@ class Program:
                   out += f" labeltooltip=\"dependence variable: {label}\","
                   out += f" tooltip=\"not on cyclical path\", {arrow}];\n"
 
+        # control edges of the conditional branches (speculated: not data dependences)
+        if show_internal:
+            for iter_id in range(1, max_iters + 1):
+                for b, k in branches:
+                    prob = self.instruction_list[b].prob
+                    for j in range(b + 1, b + 1 + k):
+                        out += f"  i{iter_id}s{b} -> i{iter_id}s{j} [style=dotted, color=gray45, arrowhead=onormal, "
+                        out += f"constraint=false, tooltip=\"control (speculated, not a data dependence): "
+                        out += f"skipped when the branch is taken (p={prob:.2f})\"];\n"
+
         # generate dependence links to loop-carried variables in final iteration
         for LoopCar_id in range( len(self.loop_carried) ):
            (prod_id,_) = self.loop_carried[LoopCar_id]
@@ -693,13 +875,29 @@ class Program:
         used_ports = [i for i in range(32) if (all_ports >> i) & 1]
         n_ports = len(used_ports)
 
-        dw_cycles = self.n / dw
-        rw_cycles = self.n / rw
+        # conditional branches: each instruction counts with its probability of being executed
+        branches = self.conditional_branches()
+        weights  = self.execution_probabilities() if branches else None
+        expected = sum(weights) if branches else self.n
+
+        dw_cycles = expected / dw
+        rw_cycles = expected / rw
 
         # max_latency    = maximum latency per iteration
         max_latency, *_ = self.get_critical_latencies()
+        if branches:
+            # range: with all the conditional blocks executed, and with none of them
+            skipped = {j for i, k in branches for j in range(i + 1, i + 1 + k)}
+            reduced = Program()
+            reduced.load_instruction_list([d for j, d in enumerate(process.instruction_list) if j not in skipped])
+            without_blocks, *_ = reduced.get_critical_latencies()
+            with_blocks = max_latency
+            analysis["LatencyRange"] = {"with_blocks": with_blocks, "without_blocks": without_blocks,
+                                        "min": min(with_blocks, without_blocks),
+                                        "max": max(with_blocks, without_blocks)}
+            max_latency = min(with_blocks, without_blocks)
 
-        port_groups = self.relevant_port_groups(used_ports)
+        port_groups = self.relevant_port_groups(used_ports, weights)
         port_cycles = max((g["cycles"] for g in port_groups), default=0)
         max_cycles  = max(port_cycles, dw_cycles, rw_cycles)
 
@@ -716,6 +914,22 @@ class Program:
             analysis["performance-bound"] = "LATENCY+THROUGHPUT"
         
         analysis["BestTime"] = cycles_limit
+
+        if branches:
+            info, mispredictions = [], 0.0
+            for i, k in branches:
+                inst = self.instruction_list[i]
+                estimated = inst.mispredict is None
+                rate = self.predictor_misprediction_rate(inst.prob) if estimated else inst.mispredict
+                mispredictions += weights[i] * rate
+                info.append({"index": i, "skip": k, "prob": inst.prob, "mispredict": rate,
+                             "estimated": estimated, "exec_prob": weights[i]})
+            analysis["Branches"] = info
+            analysis["ExecProbability"] = weights
+            analysis["MispredictionsPerIter"] = mispredictions
+            analysis["BranchPenalty"] = process.bPenalty
+            analysis["MispredictTime"] = mispredictions * process.bPenalty
+            analysis["EstimatedTime"] = cycles_limit + mispredictions * process.bPenalty
 
         # Throughput bound of every relevant resource. Each entry:
         #   resource:     "Dispatch", "Retire" or "Ports"
@@ -762,7 +976,7 @@ class Program:
 
         return json.dumps(analysis, indent=2)
 
-    def relevant_port_groups(self, used_ports):
+    def relevant_port_groups(self, used_ports, weights=None):
         # Port subsets S worth evaluating (methodology of the performance-analysis guide):
         #  - every used port on its own (even if no instruction is restricted to it);
         #  - combinations of 2 or more ports that are exactly the union of the ports of the
@@ -798,7 +1012,7 @@ class Program:
                                                       if (self.instruction_list[i].ports & ~mask) >> p & 1]}
                                      for i in excluded],
                     "throughput":   r,
-                    "cycles":       len(inside) / r,
+                    "cycles":       (sum(weights[i] for i in inside) if weights else len(inside)) / r,
                 })
         return groups
 

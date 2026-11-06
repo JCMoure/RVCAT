@@ -93,6 +93,36 @@ def generate_execution_graph (static_instructions, N, window_size, DepEdges):
 
    return ExecGraph
 
+def build_rows_graph(rows, window_size):
+    # Execution graph of a simulation with conditional branches, built after it from the rows
+    # (dispatched instructions, in dispatch order). rows: [{"correct", "deps" (row indices of
+    # the producers), "disp", "exec", "ret"}]. Correct-path rows get the same nodes and weights
+    # as generate_execution_graph + exec_graph_update; wrong-path rows get nodes without edges.
+    ExecGraph = CompactExecutionGraph()
+    previous = None
+    correct_rows = []
+    for r, row in enumerate(rows):
+        if not row["correct"]:
+            for _ in range(3):
+                ExecGraph.append_node([])
+            continue
+        disp = min(row["disp"], 1)
+        ret  = min(row["ret"], 1)
+        dispatch_edges = []
+        if previous is not None:
+            dispatch_edges.append((previous * 3, disp))
+        if len(correct_rows) >= window_size:
+            dispatch_edges.append((correct_rows[-window_size] * 3 + 2, 0))
+        ExecGraph.append_node(dispatch_edges)
+        ExecGraph.append_node([(r * 3, 1)] + [(d * 3 + 1, rows[d]["exec"]) for d in row["deps"]])
+        retire_edges = [(r * 3 + 1, 1 + row["exec"])]
+        if previous is not None:
+            retire_edges.append((previous * 3 + 2, ret))
+        ExecGraph.append_node(retire_edges)
+        correct_rows.append(r)
+        previous = r
+    return ExecGraph
+
 def get_iteration_idx( n, index ):
      instr_idx = index // 3
      static_idx= instr_idx  % n
@@ -153,17 +183,19 @@ def serialize_execution_graph(ExecGraph, dynamic_instruction_count):
         ]
     }
 
-def find_repeating_critical_path_pattern(N, instr_list, path, iterations):
+def find_repeating_critical_path_pattern(N, instr_list, path, iterations, locate=None):
     if N < 1 or iterations < 1 or not path:
         return None
 
     signatures = [[] for _ in range(iterations)]
     for node, weight in reversed(path):
-        dynamic_idx = node // 3
-        iteration = dynamic_idx // N
+        if locate is None:
+            iteration, static_idx = (node // 3) // N, (node // 3) % N
+        else:
+            iteration, static_idx = locate(node)
         if iteration < iterations:
             signatures[iteration].append(
-                (dynamic_idx % N, node % 3, int(weight))
+                (static_idx, node % 3, int(weight))
             )
 
     best_start = 0
@@ -204,7 +236,8 @@ def find_repeating_critical_path_pattern(N, instr_list, path, iterations):
     }
 
 
-def critical_path_statistics_json (N, instr_list, path, iterations=None):
+def critical_path_statistics_json (N, instr_list, path, iterations=None, locate=None):
+    # locate(node) -> (iteration, static index); by default node // 3 is iteration * N + index
     total_lat = 0
     histogram = [0 for i in range(N)]
     decode_lat= 0
@@ -212,7 +245,7 @@ def critical_path_statistics_json (N, instr_list, path, iterations=None):
 
     for node in path:
          stage = node[0] % 3
-         iteration, idx = get_iteration_idx(N, node[0])
+         iteration, idx = get_iteration_idx(N, node[0]) if locate is None else locate(node[0])
          if stage == 1:
              histogram[idx] += node[1]
          elif stage == 0:
@@ -233,7 +266,7 @@ def critical_path_statistics_json (N, instr_list, path, iterations=None):
     if iterations is None:
         iterations = max((node[0] // 3) // N for node in path) + 1
     repeating_pattern = find_repeating_critical_path_pattern(
-        N, instr_list, path, iterations
+        N, instr_list, path, iterations, locate
     )
     if repeating_pattern is not None:
         out["repeating_pattern"] = repeating_pattern
