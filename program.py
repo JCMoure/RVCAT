@@ -383,6 +383,17 @@ class Program:
                 probs[i] += prob
         return probs
 
+    def resolution_latency(self, i):
+        # Cycles from the start of an iteration until instruction i can finish, following the
+        # data dependences inside the iteration (producers written earlier in the same iteration;
+        # loop-carried values are assumed ready). For a conditional branch: an approximation of
+        # the time until it resolves, during which the instructions that follow it are not useful.
+        depth = {}
+        for j in range(i + 1):
+            ready = max((depth[p] for p, _ in self.inst_dependence_list[j] if 0 <= p < j), default=0)
+            depth[j] = ready + self.instruction_list[j].latency
+        return depth[i]
+
     def _written_variables(self):
         return {inst.destin for inst in self.instruction_list if inst.destin}
 
@@ -899,6 +910,11 @@ class Program:
         dw_cycles = expected / dw
         rw_cycles = expected / rw
 
+        def throughput_time(w):
+            # throughput bound when instruction i is executed w[i] times per iteration
+            groups = self.relevant_port_groups(used_ports, w)
+            return max([sum(w) / dw, sum(w) / rw] + [g["cycles"] for g in groups])
+
         # max_latency    = maximum latency per iteration
         max_latency, *_ = self.get_critical_latencies()
         if branches:
@@ -912,6 +928,12 @@ class Program:
                                         "min": min(with_blocks, without_blocks),
                                         "max": max(with_blocks, without_blocks)}
             max_latency = min(with_blocks, without_blocks)
+            # throughput: with every conditional block executed, and with none of them
+            # (informative: the bound uses the expected number of executed instructions)
+            t_with    = throughput_time([1.0] * self.n)
+            t_without = throughput_time([0.0 if j in skipped else 1.0 for j in range(self.n)])
+            analysis["ThroughputRange"] = {"with_blocks": t_with, "without_blocks": t_without,
+                                           "min": min(t_with, t_without), "max": max(t_with, t_without)}
 
         port_groups = self.relevant_port_groups(used_ports, weights)
         port_cycles = max((g["cycles"] for g in port_groups), default=0)
@@ -932,20 +954,26 @@ class Program:
         analysis["BestTime"] = cycles_limit
 
         if branches:
-            info, mispredictions = [], 0.0
+            # Cost of a misprediction: the instructions after the branch are not useful from its
+            # dispatch until it resolves (resolution latency, approximated by the dependence chain
+            # that computes its condition) plus the branch penalty of the processor
+            info, mispredictions, mispredict_time = [], 0.0, 0.0
             for i, k in branches:
                 inst = self.instruction_list[i]
                 estimated = inst.mispredict is None
                 rate = self.predictor_misprediction_rate(inst.prob) if estimated else inst.mispredict
-                mispredictions += weights[i] * rate
+                resolution = self.resolution_latency(i)
+                mispredictions  += weights[i] * rate
+                mispredict_time += weights[i] * rate * (resolution + process.bPenalty)
                 info.append({"index": i, "skip": k, "prob": inst.prob, "mispredict": rate,
-                             "estimated": estimated, "exec_prob": weights[i]})
+                             "estimated": estimated, "exec_prob": weights[i], "resolution": resolution,
+                             "cost": resolution + process.bPenalty})
             analysis["Branches"] = info
             analysis["ExecProbability"] = weights
             analysis["MispredictionsPerIter"] = mispredictions
             analysis["BranchPenalty"] = process.bPenalty
-            analysis["MispredictTime"] = mispredictions * process.bPenalty
-            analysis["EstimatedTime"] = cycles_limit + mispredictions * process.bPenalty
+            analysis["MispredictTime"] = mispredict_time
+            analysis["EstimatedTime"] = cycles_limit + mispredict_time
 
         # Throughput bound of every relevant resource. Each entry:
         #   resource:     "Dispatch", "Retire" or "Ports"
@@ -957,11 +985,12 @@ class Program:
         #   cycles:       len(instructions) / throughput  (cycles per iteration)
         #   bottleneck:   True when cycles is the throughput bound
         all_instrs = list(range(self.n))
+        #   expected:     instructions executed per iteration (each one with its probability)
         bounds = [
             {"resource": "Dispatch", "ports": [], "instructions": all_instrs, "excluded": [],
-             "throughput": dw, "cycles": dw_cycles},
+             "throughput": dw, "cycles": dw_cycles, "expected": expected},
             {"resource": "Retire", "ports": [], "instructions": all_instrs, "excluded": [],
-             "throughput": rw, "cycles": rw_cycles},
+             "throughput": rw, "cycles": rw_cycles, "expected": expected},
         ] + [dict(resource="Ports", **g) for g in port_groups]
         for b in bounds:
             b["bottleneck"] = b["cycles"] == max_cycles
@@ -1028,6 +1057,7 @@ class Program:
                                                       if (self.instruction_list[i].ports & ~mask) >> p & 1]}
                                      for i in excluded],
                     "throughput":   r,
+                    "expected":     sum(weights[i] for i in inside) if weights else len(inside),
                     "cycles":       (sum(weights[i] for i in inside) if weights else len(inside)) / r,
                 })
         return groups

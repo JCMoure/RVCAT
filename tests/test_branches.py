@@ -62,7 +62,15 @@ class StaticAnalysisTest(unittest.TestCase):
         a = json.loads(Program().get_performance_analysis(process(f1(prob=0.4, mispredict=0.2))))
         self.assertAlmostEqual(a['ExecProbability'][4], 0.6)
         self.assertAlmostEqual(a['MispredictionsPerIter'], 0.2)
-        self.assertAlmostEqual(a['MispredictTime'], 2.0)
+        # cost of a misprediction: resolution (loads 4 + compare 3 + branch 1) + penalty 10
+        self.assertEqual(a['Branches'][0]['resolution'], 8)
+        self.assertAlmostEqual(a['MispredictTime'], 0.2 * (8 + 10))
+        self.assertAlmostEqual(a['EstimatedTime'], a['BestTime'] + 3.6)
+        # throughput: expected instructions (the store runs with probability 0.6), and range
+        dispatch = a['Throughput-Bounds'][0]
+        self.assertAlmostEqual(dispatch['expected'], 7.6)
+        self.assertAlmostEqual(dispatch['cycles'], 7.6 / 4)
+        self.assertEqual(a['ThroughputRange']['max'], 2.0)
         self.assertIn('LatencyRange', a)
         # the branch port runs two branches per iteration
         ports = [b for b in a['Throughput-Bounds'] if b['resource'] == 'Ports' and b['ports'] == [5]]
