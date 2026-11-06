@@ -983,6 +983,10 @@ class Scheduler:
         return json.dumps(out)
 
     def _timeline_dynamic(self, ports, nret):
+        # the timeline is limited by retired instructions (nret), not by iterations: each iteration
+        # retires at least one instruction, so nret iterations are always enough
+        if nret is not None:
+            self.iterations = max(self.iterations, nret)
         states        = {}
         port_timeline = {port: [] for port in ports}
         cache_states  = []

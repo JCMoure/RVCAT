@@ -22,6 +22,7 @@ class Instruction:
         self.source1  = ""
         self.source2  = ""
         self.source3  = ""
+        self.mask     = ""   # masked vector store: variable with the mask (only the true lanes are written)
         self.constant = ""
         self.stride   = 1
         self.lanes    = 1
@@ -42,6 +43,7 @@ class Instruction:
         instr.source1    = data.get("source1", "")
         instr.source2    = data.get("source2", "")
         instr.source3    = data.get("source3", "")
+        instr.mask       = data.get("mask", "") or ""
         instr.constant   = data.get("constant", "")
         instr.lanes      = data.get("lanes", 1)
         instr.stride     = data.get("stride", 1)
@@ -63,6 +65,7 @@ class Instruction:
             "source1":  self.source1,
             "source2":  self.source2,
             "source3":  self.source3,
+            "mask":     self.mask,
             "constant": self.constant,
             "lanes":    self.lanes,
             "stride":   self.stride,
@@ -196,6 +199,7 @@ class Program:
         Reads1  = [] ## List of  first input variable names in program's instruction order
         Reads2  = [] ## List of second input variable names in program's instruction order
         Reads3  = [] ## List of third output variable names in program's instruction order
+        Reads4  = [] ## List of masks (masked stores) in program's instruction order
         Consts  = [] ## List of constants in program's instruction order
 
         for inst in self.instruction_list:
@@ -204,6 +208,7 @@ class Program:
             Reads1.append(inst.source1)
             Reads2.append(inst.source2)
             Reads3.append(inst.source3)
+            Reads4.append(inst.mask)
 
         # List of variable names that are output of an instruction (appears only once)
         Outputs = list(set(Outs))  
@@ -211,7 +216,7 @@ class Program:
           Outputs.remove("")
 
         # List of variable names that are input of an instruction (appears only once)
-        Inputs = list(set(Reads1+Reads2+Reads3))  
+        Inputs = list(set(Reads1+Reads2+Reads3+Reads4))  
         if "" in Inputs:
           Inputs.remove("")
 
@@ -284,6 +289,17 @@ class Program:
                     self.read_only.append(source_var)
                 dep = [prod_idx, var_idx]
                 dep_list.append(dep)
+
+            source_var = Reads4[inst_id]
+            if source_var and source_var not in (Reads1[inst_id], Reads2[inst_id], Reads3[inst_id]):
+                var_idx = self.variables.index(source_var)    # mask of a masked store
+                if source_var in Outputs:
+                    out_idx  = Outputs.index(source_var)
+                    prod_idx = producer_list[out_idx]
+                else:
+                    prod_idx = -3
+                    self.read_only.append(source_var)
+                dep_list.append([prod_idx, var_idx])
 
             output_var = Outs[inst_id]
             if output_var:  # modify producer of this variable
@@ -375,7 +391,7 @@ class Program:
         written = self._written_variables()
         inst = self.instruction_list[i]
         out = []
-        for v in (inst.source1, inst.source2, inst.source3):
+        for v in (inst.source1, inst.source2, inst.source3, inst.mask):
             if v and v in written and v not in out:
                 out.append(v)
         return out

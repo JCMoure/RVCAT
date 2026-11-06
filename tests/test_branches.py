@@ -77,6 +77,20 @@ class StaticAnalysisTest(unittest.TestCase):
         self.assertIn('filled,dashed', dot)
 
 
+class MaskedStoreTest(unittest.TestCase):
+
+    def test_masked_store_depends_on_its_mask(self):
+        prog = [I('m = a < b', 'VFLOAT', 'CMP', 'single', 'm', 'a', 'b', lat=3, ports=FADD),
+                I('C[x:x+7] = a[0:7] if m[0:7]', 'VMEM', 'STORE', 'word', '', 'a', 'C', 'x', ports=ST, mask='m'),
+                I('x = x + 8', 'INT', 'ARITH', 'word', 'x', 'x', const='8'),
+                I('if c go back', 'BRANCH', '', '', '', 'c', ports=BR)]
+        p = Program()
+        p.load_instruction_list(prog)
+        producers = [dep[0] for dep in p.inst_dependence_list[1] if dep[0] >= 0]
+        self.assertIn(0, producers)
+        self.assertEqual(p.read_variables(1), ['x', 'm'])
+
+
 class DynamicSimulationTest(unittest.TestCase):
 
     def test_no_mispredictions_with_rate_zero(self):
