@@ -1,4 +1,4 @@
-from .window   import Window, InstrState
+from .window   import Window, InstrState, timeline_char
 from .program  import Process, _program
 from .cache    import Cache
 from .         import exec_graph as ex
@@ -287,7 +287,7 @@ class Scheduler:
 
         cycle = 1
         while stages[0] == InstrState.WAIT_DATA:
-            decode_stage += stages[0].value
+            decode_stage += timeline_char(stages[0])
             stages.pop(0)
             cycle = cycle+1
         
@@ -305,7 +305,7 @@ class Scheduler:
             critical_path.pop(-1)
         
         while stages[0] != InstrState.RETIRE:
-            execute_stage += stages[0].value
+            execute_stage += timeline_char(stages[0])
             stages.pop(0)
             cycle = cycle+1
             if count > 0:
@@ -1067,7 +1067,7 @@ class Scheduler:
                 continue
             seq = [st for _, st in cycles]
             if r.wrong:
-                text = "D" + "".join(st.value for st in seq[1:] if st != InstrState.SQUASHED) + "x"
+                text = "D" + "".join(timeline_char(st) for st in seq[1:] if st != InstrState.SQUASHED) + "x"
                 critical = []
             else:
                 text, critical = self.generate_timeline_state(i, seq, critical_path)

@@ -330,8 +330,8 @@ class JsonSerializationTests(unittest.TestCase):
         port_owners = timeline["resource_usage"]["port_owners"]["0"]
         self.assertEqual(sum(0 in rows for rows in port_owners), 1)
         self.assertEqual(sum(1 in rows for rows in port_owners), 1)
-        self.assertEqual(first[4].count("L"), 1)
-        self.assertEqual(second[4].count("L"), 1)
+        self.assertEqual(first[4].count("E"), 1)
+        self.assertEqual(second[4].count("E"), 1)
         self.assertEqual(second[4].count("@"), 1)
 
     def test_cache_state_reports_block_address_dirty_bit_and_pending_fill(self):
@@ -490,8 +490,10 @@ class JsonSerializationTests(unittest.TestCase):
 
         timeline = json.loads(Scheduler().get_timeline(process, nret=4))
         requests = timeline["resource_usage"]["mm_requests"]
+        # all the instructions are stores (their execution is shown with E, like any instruction)
         store_rows = [
-            row for row in timeline["instructions"] if "S" in row[4]
+            row for row in timeline["instructions"]
+            if process["instruction_list"][row[1]]["oper"] == "STORE" and "E" in row[4]
         ]
         cache_lines = [
             line

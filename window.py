@@ -24,6 +24,12 @@ class InstrState(Enum):
     UNKNOWN         = "?"
     NONE            = " "
 
+# Character of a state in the timeline: loads and stores execute like any other instruction,
+# so their execution is shown with E too (LOAD and STORE are kept as states: the cache needs them)
+def timeline_char(state: InstrState) -> str:
+    return 'E' if state in (InstrState.LOAD, InstrState.STORE) else state.value
+
+
 class InstrInstance:
     def __init__(self, dispatch_cycle: int, dynamic_idx: int, static_idx: int, mType: int, addr: int) -> None:
         self.d_idx    = dynamic_idx
