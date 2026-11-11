@@ -198,8 +198,9 @@ class Scheduler:
                                 port for port in required_ports if used_ports[port]
                             ] or required_ports
                             instr.exec_lat += 1
-                      else:
-                        instr.substate  = InstrState.WAIT_BANDWIDTH
+                      else:   # all the ports are busy (issue width = number of ports): a port conflict
+                        instr.substate  = InstrState.WAIT_RESOURCE
+                        instr.waiting_ports = required_ports
                         instr.exec_lat += 1
 
                     else:   # Optimal scheduling: first priority is age, second is using most ports
@@ -234,8 +235,9 @@ class Scheduler:
                             port for port in issue_queue[w_idx] if used_ports[port]
                         ] or issue_queue[w_idx]
                         instr.exec_lat += 1
-                else:
-                    instr.substate = InstrState.WAIT_BANDWIDTH
+                else:   # all the ports are busy (issue width = number of ports): a port conflict
+                    instr.substate = InstrState.WAIT_RESOURCE
+                    instr.waiting_ports = issue_queue[w_idx]
                     instr.exec_lat += 1
 
         for branch in resolved:

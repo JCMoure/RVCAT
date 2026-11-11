@@ -630,20 +630,20 @@ class JsonSerializationTests(unittest.TestCase):
             row = timeline["instructions"][detail["instruction_index"]]
             self.assertEqual(row[4][detail["cycle"] - row[2]], ".")
 
-    def test_timeline_distinguishes_issue_bandwidth_waits_from_port_conflicts(self):
+    def test_timeline_shows_full_ports_as_port_conflicts(self):
+        # when all the ports are busy, an instruction waits for a port: "*", with the ports it can use
         process = load_process()
         process.update({"dispatch": 2, "sched": "greedy"})
 
         timeline = json.loads(Scheduler().get_timeline(process, nret=4))
-        bandwidth_waits = [
-            detail for detail in timeline["wait_details"]
-            if detail["reason"] == "issue-bandwidth"
-        ]
-
-        self.assertTrue(bandwidth_waits)
-        for detail in bandwidth_waits:
-            row = timeline["instructions"][detail["instruction_index"]]
-            self.assertEqual(row[4][detail["cycle"] - row[2]], "^")
+        self.assertNotIn("issue-bandwidth", [detail["reason"] for detail in timeline["wait_details"]])
+        for row in timeline["instructions"]:
+            self.assertNotIn("^", row[4])
+        for detail in timeline["wait_details"]:
+            if detail["reason"] == "ports":
+                row = timeline["instructions"][detail["instruction_index"]]
+                self.assertEqual(row[4][detail["cycle"] - row[2]], "*")
+                self.assertTrue(detail["ports"])
 
     def test_timeline_keeps_legacy_iteration_count_argument(self):
         process = {
