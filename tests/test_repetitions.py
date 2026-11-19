@@ -139,5 +139,26 @@ class EpilogueTest(unittest.TestCase):
         self.assertEqual(one['branch']['exit_mispredictions'], 1)
 
 
+class ProgressTest(unittest.TestCase):
+
+    def test_the_simulation_reports_its_progress(self):
+        import RVCAT.scheduler as sch
+        reports = []
+        old_fn, old_every = sch._progress_function, sch.REPORT_EVERY
+        sch._progress_function, sch.REPORT_EVERY = (lambda: reports.append), 0
+        try:
+            results(N=1000, rep=4, repStrides={'V': 0})     # dynamic dispatch
+            dynamic = list(reports)
+            reports.clear()
+            results(N=1000)                                 # static dispatch
+        finally:
+            sch._progress_function, sch.REPORT_EVERY = old_fn, old_every
+        for got in (dynamic, reports):
+            self.assertGreater(len(got), 3)
+            self.assertEqual(got, sorted(got))
+            self.assertTrue(0 <= got[0] and got[-1] <= 1)
+            self.assertGreater(got[-1], 0.8)
+
+
 if __name__ == '__main__':
     unittest.main()

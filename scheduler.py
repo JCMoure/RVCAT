@@ -4,6 +4,20 @@ from .cache    import Cache
 from .         import exec_graph as ex
 import json
 import random
+import time
+
+
+# Progress of a simulation: in the browser, the worker publishes rvcatProgress(fraction), which
+# sends it to the page (percentage done, time left, and the option to abort). Elsewhere, nothing.
+def _progress_function():
+    try:
+        import js
+        return getattr(js, 'rvcatProgress', None)
+    except Exception:
+        return None
+
+
+REPORT_EVERY = 0.2     # seconds between two reports of progress
 
 global _scheduler
 
@@ -41,6 +55,8 @@ class Scheduler:
         self.cycles     = 0
         self.DepEdges   = []
         self.dynamic    = False   # program with conditional branches: dynamic dispatch (see below)
+        self.progress_fn = None   # rvcatProgress of the browser (progress of a simulation)
+        self.last_report = 0.0
 
     def next_cycle(self) -> int:
 
@@ -267,6 +283,19 @@ class Scheduler:
 
         retires = self.retrWidth - rw
         return retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates
+
+    def _start_progress(self):
+        self.progress_fn = _progress_function()
+        self.last_report = time.monotonic()
+
+    def _report(self, fraction):
+        # called every cycle: reports at most every REPORT_EVERY seconds (the clock is read every 256 cycles)
+        if self.progress_fn is None or self.cycles & 255:
+            return
+        now = time.monotonic()
+        if now - self.last_report >= REPORT_EVERY:
+            self.last_report = now
+            self.progress_fn(min(1.0, max(0.0, fraction)))
 
     def _wake(self, instr):
         # instr has its result: the instructions waiting for it check their producers again
@@ -674,7 +703,9 @@ class Scheduler:
 
         ExecGraph  = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
+        self._start_progress()
         while retired < self.n:
+            self._report(retired / self.n)
             retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates = self.next_cycle()
             secondary_misses = set(SecondMisses)
 
@@ -989,7 +1020,10 @@ class Scheduler:
         RdPrimaryMisses = RdSecondaryMisses = WrPrimaryMisses = WrSecondaryMisses = 0
         wrong_ids = lambda idx: self.rows[idx].wrong if idx < len(self.rows) else False
 
+        self._start_progress()
         while not (self.dispatch_done and self.window.count == 0):
+            if retired:
+                self._report((retired[-1].iteration + 1) / self.iterations)
             retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates = self.next_cycle()
             secondary = set(SecondMisses)
             for idx in ReadMisses + WriteMisses:      # the misses of each repetition
