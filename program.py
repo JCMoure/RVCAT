@@ -567,39 +567,61 @@ class Program:
         # the per-iteration increment of the scheduler). N = algorithmic operations; the loop
         # runs N // S iterations (S = loop stride). Uses its own Program object, so the state
         # of the loaded program is not modified.
+        # With repetitions of the loop (programJSON rep > 1), the 1st and the 2nd calls are shown:
+        # in call r, the accesses to an array advance r * repStrides[array] elements; the block
+        # after each call (epilogue) is accessed once per call.
         #   arrays:   [{name, base, elem_size, bytes}]          (program order)
-        #   accesses: [{index, array, oper, size, lanes, stride, constant,
-        #               addr: [...], elem: [...]}]            (one value per shown iteration)
+        #   rows:     [{rep, k}]                                (call and iteration of each row)
+        #   accesses: [{index, array, oper, size, lanes, stride, constant, rep_stride,
+        #               addr: [...], elem: [...]}]            (one value per row)
+        #   epilogue: [{index, array, oper, size, lanes, constant, rep_stride,
+        #               addr: [...], elem: [...]}]            (one value per shown call)
         prog = Program()
         prog.instruction_list = [Instruction.from_json(d) for d in programJSON.get("instruction_list", [])]
         prog.n = len(prog.instruction_list)
         prog.collect_arrays()
+        prog.load_epilogue(programJSON.get("epilogue", []))
+        reps        = max(1, int(programJSON.get("rep", 1) or 1))
+        rep_strides = {a: int(v) for a, v in (programJSON.get("repStrides") or {}).items()}
         S = prog.loop_stride
         N = max(S, N - N % S)
-        prog.assign_memory_addresses(N)
+        prog.assign_memory_addresses(N, reps, rep_strides)
         iterations = N // S
         K = max(1, K)
         shown = sorted(set(range(min(K, iterations))) | set(range(max(0, iterations - K), iterations)))
+        calls = [0, 1] if reps > 1 else [0]
+        rows  = [{"rep": r, "k": k} for r in calls for k in shown]
 
         arrays = [{"name": name, "base": base, "elem_size": size, "bytes": total}
                   for name, (base, size, total) in zip(prog.arrays, prog.array_addrs)]
+
+        def access(index, inst, addrs, prob=None):
+            base     = prog.array_addrs[prog.arrays.index(inst.source2)][0]
+            dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
+            out = {"index": index, "array": inst.source2, "oper": inst.oper, "size": dataSize,
+                   "lanes": inst.lanes, "stride": inst.stride, "constant": inst.constant,
+                   "rep_stride": rep_strides.get(inst.source2, 0),
+                   "addr": addrs, "elem": [(a - base) // dataSize for a in addrs]}
+            if prob is not None:
+                out["exec_prob"] = prob
+            return out
+
+        def is_access(inst):
+            return inst.type in ("MEM", "VMEM") and inst.source2 in prog.arrays
+
         accesses = []
         exec_probs = prog.execution_probabilities() if prog.conditional_branches() else [1.0] * prog.n
         for index, inst in enumerate(prog.instruction_list):
-            if inst.type not in ("MEM", "VMEM") or inst.source2 not in prog.arrays:
-                continue
-            base     = prog.array_addrs[prog.arrays.index(inst.source2)][0]
-            dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
-            addrs    = [inst.addr + k * inst.byte_stride for k in shown]
-            accesses.append({
-                "index": index, "array": inst.source2, "oper": inst.oper, "size": dataSize,
-                "lanes": inst.lanes, "stride": inst.stride, "constant": inst.constant,
-                "addr": addrs, "elem": [(a - base) // dataSize for a in addrs],
-                "exec_prob": exec_probs[index]})
+            if is_access(inst):
+                addrs = [inst.addr + row["k"] * inst.byte_stride + row["rep"] * inst.rep_byte_stride for row in rows]
+                accesses.append(access(index, inst, addrs, exec_probs[index]))
+        epilogue = [access(prog.n + j, inst, [inst.addr + r * inst.rep_byte_stride for r in calls])
+                    for j, inst in enumerate(prog.epilogue) if is_access(inst)]
 
         return json.dumps({"N": N, "S": S, "iterations": iterations, "shown": shown,
-                           "arrays": arrays, "accesses": accesses})
-            
+                           "rep": reps, "calls": calls, "rows": rows,
+                           "arrays": arrays, "accesses": accesses, "epilogue": epilogue})
+
     def generate_dependence_info (self) -> None:
 
         # Used by execution scheduler to control data dependencies during execution

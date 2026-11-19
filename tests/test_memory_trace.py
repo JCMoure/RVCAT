@@ -63,5 +63,32 @@ class MemoryTraceTest(unittest.TestCase):
         self.assertEqual(t["accesses"], [])
 
 
+class RepetitionTraceTest(unittest.TestCase):
+
+    def test_first_and_second_call_and_block(self):
+        prog = {"instruction_list": [mem("LOAD", "V"), mem("LOAD", "W"), branch()],
+                "rep": 3, "repStrides": {"V": 10, "W": 0},
+                "epilogue": [mem("STORE", "Y", constant="1")]}
+        t = json.loads(Program().get_memory_trace(prog, 10, 2))
+        self.assertEqual(t["calls"], [0, 1])
+        self.assertEqual([(r["rep"], r["k"]) for r in t["rows"]],
+                         [(0, 0), (0, 1), (0, 8), (0, 9), (1, 0), (1, 1), (1, 8), (1, 9)])
+        v, w = t["accesses"]
+        self.assertEqual(v["elem"], [0, 1, 8, 9, 10, 11, 18, 19])     # call 2: +10 elements
+        self.assertEqual(w["elem"], [0, 1, 8, 9, 0, 1, 8, 9])         # the same data in every call
+        self.assertEqual(t["arrays"][0]["bytes"], 120)                # V: 3 calls of 10 elements
+        self.assertEqual(w["addr"][0], 120)
+        (y,) = t["epilogue"]
+        self.assertEqual(y["index"], 3)
+        self.assertEqual(y["elem"], [1, 1])
+
+    def test_without_repetitions_one_call(self):
+        t = trace([mem("LOAD", "V"), branch()], N=10)
+        self.assertEqual(t["calls"], [0])
+        self.assertEqual(len(t["rows"]), len(t["shown"]))
+        self.assertEqual(t["epilogue"], [])
+
+
+
 if __name__ == "__main__":
     unittest.main()
