@@ -99,6 +99,7 @@ class Process:
         self.repIndependent = True  # the repetitions do not use the results of the previous one: they can overlap
         self.repStrides = {}    # array name -> elements that its accesses advance in each repetition (0: same data)
         self.forceDynamic = False   # (tests) simulate with the dynamic dispatch even without repetitions or branches
+        self.epilogue = []      # instructions executed once after each call of the loop (same format)
         self.instruction_list = []      # list of instructions in the program (in program order)
         
     def from_json(data: dict):
@@ -132,6 +133,9 @@ class Process:
         process.repIndependent   = data.get("repIndependent", True)
         process.repStrides       = data.get("repStrides", {}) or {}
         process.forceDynamic     = bool(data.get("forceDynamic", False))
+        process.epilogue         = data.get("epilogue", []) or []
+        if not isinstance(process.epilogue, list):
+            raise ValueError("epilogue must be a list of instructions.")
         if isinstance(process.rep, bool) or not isinstance(process.rep, int) or not 1 <= process.rep <= 50000:
             raise ValueError("rep must be an integer between 1 and 50000.")
         if not isinstance(process.repIndependent, bool):
@@ -162,6 +166,7 @@ class Process:
             "rep":              self.rep,
             "repIndependent":   self.repIndependent,
             "repStrides":       self.repStrides,
+            "epilogue":         self.epilogue,
             "instruction_list": self.instruction_list
         }
 
@@ -172,6 +177,7 @@ class Program:
         # data loaded/stored which do not change during execution
         self.n                = 0       # number of instructions in the program
         self.instruction_list = []      # list of instructions in the program (in program order)
+        self.epilogue         = []      # instructions executed after each call of the loop (simulation)
 
         # data generated when loading a new program. Do not need to save it
         self.variables    = [] # variable names (each appears only once, in program order)
@@ -186,7 +192,18 @@ class Program:
         self.inst_cyclic          = []  # list of inst_ids in cyclic paths (only once)
 
     def __getitem__(self, i: int):
+        if self.epilogue and i >= self.n:      # an instruction of the block after each call
+            return self.epilogue[i - self.n]
         return self.instruction_list[i%self.n]
+
+    # The block of instructions executed after each call of the loop (only for the simulation: the
+    # static analysis is about the loop). Its arrays are added to the arrays of the loop.
+    def load_epilogue(self, instrs) -> None:
+        self.epilogue = [Instruction.from_json(d) for d in (instrs or [])]
+        for inst in self.epilogue:
+            if inst.type in ("MEM", "VMEM") and inst.source2 and inst.source2 not in self.arrays:
+                self.arrays.append(inst.source2)
+                self.array_addrs.append(0)
 
     # Load JSON object containing program specification
     def load_instruction_list(self, instrs) -> None:
@@ -194,6 +211,7 @@ class Program:
         self.instruction_list = []
         for instr_dict in instrs:
             self.instruction_list.append(Instruction.from_json(instr_dict))
+        self.epilogue     = []
         self.n            = len(self.instruction_list)
         self.loop_stride  = 1  # by default, loop stride is 1
         self.variables    = [] # variable names (each appears only once, in program order)
@@ -413,12 +431,13 @@ class Program:
         return depth[i]
 
     def _written_variables(self):
-        return {inst.destin for inst in self.instruction_list if inst.destin}
+        return {inst.destin for inst in self.instruction_list + self.epilogue if inst.destin}
 
     def read_variables(self, i):
         # variables read by instruction i that some instruction writes (data dependences)
+        # (i >= n: an instruction of the block after each call)
         written = self._written_variables()
-        inst = self.instruction_list[i]
+        inst = self[i] if i >= self.n else self.instruction_list[i]
         out = []
         for v in (inst.source1, inst.source2, inst.source3, inst.mask):
             if v and v in written and v not in out:
@@ -509,9 +528,15 @@ class Program:
         for arrayName in self.arrays:
             array_size = 0
             dataSize = 0
-            for inst in self.instruction_list:
+            for inst in self.instruction_list + self.epilogue:
                 if inst.type == "MEM" or inst.type == "VMEM":
-                    if (arrayName == inst.source2):
+                    if arrayName == inst.source2 and inst in self.epilogue:   # once per call
+                        const = 0 if inst.constant == "" else int(inst.constant)
+                        dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
+                        inst.byte_stride = 0
+                        inst.addr = init_addr + const*dataSize
+                        array_size = max(array_size, (const + inst.lanes)*dataSize)
+                    elif (arrayName == inst.source2):
                         const = 0 if inst.constant == "" else int(inst.constant)
                         dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
                         inst.byte_stride = dataSize*inst.lanes*inst.stride
@@ -529,7 +554,7 @@ class Program:
                            array_size = max(array_size, last_addr+dataSize*inst.lanes-init_addr)
 
             rep_bytes = rep_strides.get(arrayName, 0) * dataSize
-            for inst in self.instruction_list:
+            for inst in self.instruction_list + self.epilogue:
                 if (inst.type == "MEM" or inst.type == "VMEM") and inst.source2 == arrayName:
                     inst.rep_byte_stride = rep_bytes
             array_size += (reps - 1) * rep_bytes   # the data of the other repetitions follow

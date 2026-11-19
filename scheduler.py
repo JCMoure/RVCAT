@@ -176,8 +176,8 @@ class Scheduler:
                                     instr.waiting_for.append(instr_dep.d_idx)
 
                 if instr.substate != InstrState.WAIT_DATA:
-                    port_mask = _program.instruction_list[static_idx].ports
-                    latency   = _program.instruction_list[static_idx].latency
+                    port_mask = _program[static_idx].ports
+                    latency   = _program[static_idx].latency
                     required_ports= [port for port in range(32) if (port_mask >> port) & 1]
                     if not sched:  # Greedy scheduling algorithm
                       if xw:
@@ -488,6 +488,7 @@ class Scheduler:
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
 
+        _program.load_epilogue(process.epilogue)
         _program.assign_memory_addresses(process.Nloop, process.rep, process.repStrides)
         self._setup_dynamic(process)
         
@@ -510,7 +511,7 @@ class Scheduler:
         self.dispatched = 0
 
         all_ports = 0
-        for instr in _program.instruction_list:
+        for instr in _program.instruction_list + _program.epilogue:
             all_ports |= instr.ports
         self.port_mask = all_ports
 
@@ -605,6 +606,7 @@ class Scheduler:
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
 
+        _program.load_epilogue(process.epilogue)
         _program.assign_memory_addresses(process.Nloop, process.rep, process.repStrides)
         self._setup_dynamic(process)
         
@@ -637,7 +639,7 @@ class Scheduler:
         WrPrimaryMisses, WrSecondaryMisses = 0, 0
 
         all_ports = 0
-        for instr in _program.instruction_list:
+        for instr in _program.instruction_list + _program.epilogue:
             all_ports |= instr.ports
         self.port_mask = all_ports
 
@@ -774,20 +776,25 @@ class Scheduler:
         self.rep_independent = process.repIndependent
         self.iters_rep = self.iterations
         self.rep_misses = []
-        self.dynamic = bool(branches) or self.reps > 1 or process.forceDynamic
+        self.n_epi = len(_program.epilogue)
+        self.exit_mispredictions = 0
+        self.dynamic = bool(branches) or self.reps > 1 or self.n_epi > 0 or process.forceDynamic
         if not self.dynamic:
             return
-        if self.reps > 1 or process.forceDynamic:
+        # the exit of each call is a mispredicted branch (with repetitions, or a block after the loop)
+        self.exit_mispredict = self.reps > 1 or self.n_epi > 0
+        if self.reps > 1 or self.n_epi > 0 or process.forceDynamic:
             self.iters_rep = max(1, process.Nloop // _program.loop_stride)   # iterations of one call
             self.iterations = self.iters_rep * self.reps
             if self.reps > 1 and self.iterations > MAX_REP_ITERATIONS:
                 raise ValueError(f"Repetitions × iterations must be at most {MAX_REP_ITERATIONS:,}.")
-        self.rep_bytes    = [getattr(inst, "rep_byte_stride", 0) for inst in _program.instruction_list]
+        every             = _program.instruction_list + _program.epilogue
+        self.rep_bytes    = [getattr(inst, "rep_byte_stride", 0) for inst in every]
         self.skips        = dict(branches)
         self.speculation  = process.speculation
         self.bPenalty     = process.bPenalty
-        self.sources      = [_program.read_variables(i) for i in range(_program.n)]
-        self.addr0        = [inst.addr for inst in _program.instruction_list]
+        self.sources      = [_program.read_variables(i) for i in range(_program.n + self.n_epi)]
+        self.addr0        = [inst.addr for inst in every]
         self.rename       = {}
         self.cursor       = (0, 0)
         self.wrong_cursor = None
@@ -840,6 +847,8 @@ class Scheduler:
             if instr.type == "MEM" or instr.type == "VMEM":
                 mem  = 1 if instr.oper == "LOAD" else 2
                 r, kk = divmod(k, self.iters_rep) if self.reps > 1 else (0, k)   # repetition, and iteration in it
+                if s >= self.num_instr:                 # the block after the call: once per call
+                    kk = 0
                 addr = self.addr0[s] + kk * instr.byte_stride + r * self.rep_bytes[s]
             d = self.next_d
             self.next_d += 1
@@ -874,10 +883,24 @@ class Scheduler:
                 nxt = actual
             elif s == self.num_instr - 1:      # final branch of the loop
                 nxt = (k + 1, 0)
-                if not wrong and k == self.iterations - 1:
-                    self.dispatch_done = True
-                elif self.reps > 1 and (k + 1) % self.iters_rep == 0 and self.rep_independent:
-                    self.rename = {}              # a new independent call: the recurrences start again
+                ends = (k + 1) % self.iters_rep == 0 if (self.reps > 1 or self.n_epi) else k == self.iterations - 1
+                if not wrong and ends:
+                    # the last iteration of a call: the block after it, or the next call
+                    nxt = (k, self.num_instr) if self.n_epi else self._next_call(k)
+                    if self.exit_mispredict and not self.dispatch_done:
+                        # the exit of the loop is mispredicted: the front-end goes on with the loop
+                        inst.mispredicted = True
+                        inst.checkpoint   = dict(self.rename)
+                        self.mispredictions += 1
+                        self.exit_mispredictions += 1
+                        self.cursor = nxt
+                        if self.speculation == "wrong-path":
+                            self.wrong_cursor = (k + 1, 0)
+                        else:
+                            self.blocked_by = d
+                        continue
+            elif s >= self.num_instr:          # the block after a call
+                nxt = (k, s + 1) if s + 1 < self.num_instr + self.n_epi else self._next_call(k)
             else:
                 nxt = (k, s + 1)
             if wrong:
@@ -886,6 +909,14 @@ class Scheduler:
                 self.cursor = nxt
 
         self.cycles += 1
+
+    def _next_call(self, k):
+        # the call that contains iteration k ends: the next one starts (or the simulation ends)
+        if k == self.iterations - 1:
+            self.dispatch_done = True
+        elif self.rep_independent:
+            self.rename = {}              # a new independent call: the recurrences start again
+        return (k + 1, 0)
 
     def _resolve(self, branch):
         # a mispredicted branch finishes: squash the wrong path, restore renaming, refill the front-end
@@ -911,6 +942,7 @@ class Scheduler:
             "branches": self.branches_executed,
             "mispredictions": self.mispredictions,
             "mispredictions_per_iteration": self.mispredictions / self.iterations,
+            "exit_mispredictions": self.exit_mispredictions,
             "wrong_path_dispatched": self.wp["dispatched"],
             "wrong_path_executed": self.wp["executed"],
             "wrong_path_reads": self.wp["reads"],
@@ -1012,14 +1044,15 @@ class Scheduler:
         out["iterations_per_repetition"] = self.iters_rep
         out["rep_misses"]     = (self.rep_misses + [{"primary": 0, "secondary": 0}] * self.reps)[:self.reps]
         out["critical_path"]  = ex.critical_path_statistics_json(
-            self.num_instr, _program.instruction_list, critical_path, self.iterations, locate
+            self.num_instr + self.n_epi, _program.instruction_list + _program.epilogue, critical_path,
+            self.iterations, locate
         ) if critical_path else {"instructions": [], "dispatch": 0, "retire": 0}
         return json.dumps(out)
 
     def _timeline_dynamic(self, ports, nret):
         # the timeline is limited by retired instructions (nret), not by iterations: each iteration
         # retires at least one instruction, so nret iterations are always enough
-        if nret is not None and self.reps == 1:
+        if nret is not None and self.reps == 1 and not self.n_epi:
             self.iterations = max(self.iterations, nret)
         states        = {}
         port_timeline = {port: [] for port in ports}
