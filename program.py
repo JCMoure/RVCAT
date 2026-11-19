@@ -95,6 +95,10 @@ class Process:
         self.rThru = 1          # maximum number of returned memory instructions per cycle
         self.bPenalty = 5       # cycles to refill the front-end after a mispredicted branch resolves
         self.speculation = "stall"  # simulation option: "stall" or "wrong-path" after a misprediction
+        self.rep = 1            # repetitions of the whole loop (calls of the function)
+        self.repIndependent = True  # the repetitions do not use the results of the previous one: they can overlap
+        self.repStrides = {}    # array name -> elements that its accesses advance in each repetition (0: same data)
+        self.forceDynamic = False   # (tests) simulate with the dynamic dispatch even without repetitions or branches
         self.instruction_list = []      # list of instructions in the program (in program order)
         
     def from_json(data: dict):
@@ -124,6 +128,17 @@ class Process:
         if isinstance(process.rThru, bool) or not isinstance(process.rThru, int) or \
                 not 1 <= process.rThru <= 32:
             raise ValueError("rThru must be an integer between 1 and 32.")
+        process.rep              = data.get("rep", 1)
+        process.repIndependent   = data.get("repIndependent", True)
+        process.repStrides       = data.get("repStrides", {}) or {}
+        process.forceDynamic     = bool(data.get("forceDynamic", False))
+        if isinstance(process.rep, bool) or not isinstance(process.rep, int) or not 1 <= process.rep <= 50000:
+            raise ValueError("rep must be an integer between 1 and 50000.")
+        if not isinstance(process.repIndependent, bool):
+            raise ValueError("repIndependent must be true or false.")
+        if not isinstance(process.repStrides, dict) or any(
+                isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in process.repStrides.values()):
+            raise ValueError("repStrides must map array names to integers >= 0.")
         process.instruction_list = data.get("instruction_list", [])
         return process
 
@@ -144,6 +159,9 @@ class Process:
             "rThru":            self.rThru,
             "bPenalty":         self.bPenalty,
             "speculation":      self.speculation,
+            "rep":              self.rep,
+            "repIndependent":   self.repIndependent,
+            "repStrides":       self.repStrides,
             "instruction_list": self.instruction_list
         }
 
@@ -475,7 +493,10 @@ class Program:
         self.arrays = list(dict.fromkeys(filter(None, Arrays)))
         self.array_addrs = [0] * len(self.arrays)
 
-    def assign_memory_addresses(self, N: int) -> None:
+    def assign_memory_addresses(self, N: int, reps: int = 1, rep_strides=None) -> None:
+        # With repetitions of the loop (reps > 1), the accesses to an array advance rep_strides[array]
+        # elements in each repetition (inst.rep_byte_stride), and the array includes all of them.
+        rep_strides = rep_strides or {}
         # assign initial memory addresses and byte-stride to load/store instructions, 
         # for use in memory trace generation
         # for simplicity, we assign addresses to all array names in program order, starting from 0
@@ -507,6 +528,11 @@ class Program:
                            last_addr = inst.addr + inst.byte_stride
                            array_size = max(array_size, last_addr+dataSize*inst.lanes-init_addr)
 
+            rep_bytes = rep_strides.get(arrayName, 0) * dataSize
+            for inst in self.instruction_list:
+                if (inst.type == "MEM" or inst.type == "VMEM") and inst.source2 == arrayName:
+                    inst.rep_byte_stride = rep_bytes
+            array_size += (reps - 1) * rep_bytes   # the data of the other repetitions follow
             self.array_addrs.append([init_addr, dataSize, array_size])
             init_addr += array_size  # assign next array to the next free address after current array
 

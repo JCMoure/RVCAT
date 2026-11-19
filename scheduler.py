@@ -7,6 +7,10 @@ import random
 
 global _scheduler
 
+# Repetitions of the loop: at most this number of iterations in all (the simulation takes about
+# 0.6 ms per iteration natively, 2 to 4 times more in the browser)
+MAX_REP_ITERATIONS = 10000
+
 class Scheduler:
 
     def __init__(self) -> None:
@@ -484,7 +488,7 @@ class Scheduler:
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
 
-        _program.assign_memory_addresses(process.Nloop)
+        _program.assign_memory_addresses(process.Nloop, process.rep, process.repStrides)
         self._setup_dynamic(process)
         
         # Always creat a new cache object to reset cache state, even if nBlocks is 0 (no cache)
@@ -601,7 +605,7 @@ class Scheduler:
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
 
-        _program.assign_memory_addresses(process.Nloop)
+        _program.assign_memory_addresses(process.Nloop, process.rep, process.repStrides)
         self._setup_dynamic(process)
         
         if self.nBlocks > 0:
@@ -758,11 +762,27 @@ class Scheduler:
     #                   the ROB is full; then the wrong-path instructions are squashed (their
     #                   cache accesses in flight finish), and dispatch resumes after bPenalty.
     # ==============================================================================================
+    # Repetitions of the loop (process.rep > 1, calls of the function): they are simulated with the
+    # dynamic dispatch, one after another. Each call runs N/S iterations. If the repetitions are
+    # independent (process.repIndependent), the renaming table is emptied at the start of each one:
+    # every recurrence (sum, i...) starts again, so a call can overlap with the previous one; if not,
+    # the chains go on across the calls. The accesses to each array advance rep_byte_stride bytes
+    # in each repetition.
     def _setup_dynamic(self, process):
         branches = _program.conditional_branches()
-        self.dynamic = bool(branches)
+        self.reps = process.rep
+        self.rep_independent = process.repIndependent
+        self.iters_rep = self.iterations
+        self.rep_misses = []
+        self.dynamic = bool(branches) or self.reps > 1 or process.forceDynamic
         if not self.dynamic:
             return
+        if self.reps > 1 or process.forceDynamic:
+            self.iters_rep = max(1, process.Nloop // _program.loop_stride)   # iterations of one call
+            self.iterations = self.iters_rep * self.reps
+            if self.reps > 1 and self.iterations > MAX_REP_ITERATIONS:
+                raise ValueError(f"Repetitions × iterations must be at most {MAX_REP_ITERATIONS:,}.")
+        self.rep_bytes    = [getattr(inst, "rep_byte_stride", 0) for inst in _program.instruction_list]
         self.skips        = dict(branches)
         self.speculation  = process.speculation
         self.bPenalty     = process.bPenalty
@@ -819,7 +839,8 @@ class Scheduler:
             mem, addr = 0, -1
             if instr.type == "MEM" or instr.type == "VMEM":
                 mem  = 1 if instr.oper == "LOAD" else 2
-                addr = self.addr0[s] + k * instr.byte_stride
+                r, kk = divmod(k, self.iters_rep) if self.reps > 1 else (0, k)   # repetition, and iteration in it
+                addr = self.addr0[s] + kk * instr.byte_stride + r * self.rep_bytes[s]
             d = self.next_d
             self.next_d += 1
             self.window.push(self.cycles, d, s, mem, addr)
@@ -855,6 +876,8 @@ class Scheduler:
                 nxt = (k + 1, 0)
                 if not wrong and k == self.iterations - 1:
                     self.dispatch_done = True
+                elif self.reps > 1 and (k + 1) % self.iters_rep == 0 and self.rep_independent:
+                    self.rename = {}              # a new independent call: the recurrences start again
             else:
                 nxt = (k, s + 1)
             if wrong:
@@ -916,6 +939,12 @@ class Scheduler:
         while not (self.dispatch_done and self.window.count == 0):
             retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates = self.next_cycle()
             secondary = set(SecondMisses)
+            for idx in ReadMisses + WriteMisses:      # the misses of each repetition
+                if not wrong_ids(idx) and idx < len(self.rows):
+                    r = self.rows[idx].iteration // self.iters_rep if self.reps > 1 else 0
+                    while len(self.rep_misses) <= r:
+                        self.rep_misses.append({"primary": 0, "secondary": 0})
+                    self.rep_misses[r]["secondary" if idx in secondary else "primary"] += 1
             for idx in ReadMisses:
                 if not wrong_ids(idx):
                     RdMisses += 1
@@ -979,6 +1008,9 @@ class Scheduler:
         out["MM_Writes"]      = sum(request["operation"] == "write" for request in mm_requests)
         out["MM_usage_percent"] = 100 * len(mm_busy_cycles) / self.cycles
         out["branch"]         = self._branch_statistics()
+        out["repetitions"]    = self.reps
+        out["iterations_per_repetition"] = self.iters_rep
+        out["rep_misses"]     = (self.rep_misses + [{"primary": 0, "secondary": 0}] * self.reps)[:self.reps]
         out["critical_path"]  = ex.critical_path_statistics_json(
             self.num_instr, _program.instruction_list, critical_path, self.iterations, locate
         ) if critical_path else {"instructions": [], "dispatch": 0, "retire": 0}
@@ -987,7 +1019,7 @@ class Scheduler:
     def _timeline_dynamic(self, ports, nret):
         # the timeline is limited by retired instructions (nret), not by iterations: each iteration
         # retires at least one instruction, so nret iterations are always enough
-        if nret is not None:
+        if nret is not None and self.reps == 1:
             self.iterations = max(self.iterations, nret)
         states        = {}
         port_timeline = {port: [] for port in ports}
@@ -1074,7 +1106,8 @@ class Scheduler:
             else:
                 text, critical = self.generate_timeline_state(i, seq, critical_path)
             instructions.append([r.iteration, r.s_idx, cycles[0][0] - 1, r.port_used, text, critical,
-                                 r.memAddr, {"wrong": r.wrong, "mispredicted": r.mispredicted}])
+                                 r.memAddr, {"wrong": r.wrong, "mispredicted": r.mispredicted,
+                                             "rep": r.iteration // self.iters_rep if self.reps > 1 else 0}])
 
         timelineJson = {
             "cycles": self.cycles,
@@ -1083,6 +1116,8 @@ class Scheduler:
             "critical_path_graph": ex.serialize_execution_graph(ExecGraph, len(rows)),
             "wait_details": self.wait_details,
             "branch": self._branch_statistics(),
+            "repetitions": self.reps,
+            "iterations_per_repetition": self.iters_rep,
             "resource_usage": {
                 "ports": port_timeline,
                 "port_owners": {str(port): [[] for _ in range(self.cycles)] for port in ports},
