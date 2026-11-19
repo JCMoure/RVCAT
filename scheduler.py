@@ -11,6 +11,10 @@ global _scheduler
 # 0.6 ms per iteration natively, 2 to 4 times more in the browser)
 MAX_REP_ITERATIONS = 10000
 
+# states of an instruction that has its result (its consumers can execute)
+DONE = (InstrState.WRITE_BACK, InstrState.RETIRE)
+NONE_OR_DATA = (InstrState.NONE, InstrState.WAIT_DATA)
+
 class Scheduler:
 
     def __init__(self) -> None:
@@ -54,17 +58,17 @@ class Scheduler:
         if self.cache is not None:
             MMupdates.extend(self.cache.advance(self.cycles))
 
-        for window_idx in range(self.window.count):
+        window = self.window.ordered()        # the instructions in flight, from the oldest one
+        for window_idx, instr in enumerate(window):
 
-            instr       = self.window[window_idx]
             static_idx  = instr.s_idx
             dynamic_idx = instr.d_idx
-            instr.waiting_for = None
-            instr.waiting_ports = []
+            # (waiting_for and waiting_ports are only read in the cycles of a wait for data or for a
+            # port, and they are set again in those cycles)
 
             if instr.state == InstrState.WRITE_BACK:
                 if rw:
-                    if window_idx == 0 or self.window[window_idx-1].state == InstrState.RETIRE:
+                    if window_idx == 0 or window[window_idx-1].state == InstrState.RETIRE:
                         instr.state    = InstrState.RETIRE
                         instr.substate = InstrState.NONE
                         rw -= 1
@@ -78,6 +82,7 @@ class Scheduler:
                     instr.latency -= 1
                     if instr.latency <= 0:
                         instr.state = InstrState.WRITE_BACK
+                        self._wake(instr)
                         instr.substate = InstrState.NONE
                         if instr.wrong:
                             kind = "reads" if instr.memory == 1 else "writes"
@@ -93,6 +98,7 @@ class Scheduler:
                     if request_state == "returned":
                         self.cache.consume_completion(dynamic_idx)
                         instr.state = InstrState.WRITE_BACK
+                        self._wake(instr)
                         instr.substate = InstrState.NONE
                     elif request_state == "return_queue":
                         instr.substate = InstrState.WAIT_RETURN_QUEUE
@@ -130,6 +136,7 @@ class Scheduler:
                                 self.wp[kind[:-1] + "_misses"] += 1
                         if result == "hit":
                             instr.state = InstrState.WRITE_BACK
+                            self._wake(instr)
                             instr.substate = InstrState.NONE
                         else:
                             if instr.memory == 1:
@@ -148,32 +155,40 @@ class Scheduler:
                 instr.latency -= 1
                 if instr.latency == 0:
                     instr.state    = InstrState.WRITE_BACK
+                    self._wake(instr)
                     instr.substate = InstrState.NONE
                     if instr.mispredicted:
                         resolved.append(instr)
 
             elif instr.state == InstrState.DISPATCH:
-                if instr.substate in [InstrState.NONE, InstrState.WAIT_DATA]:
+                if instr.substate in NONE_OR_DATA:
+                    if instr.substate == InstrState.WAIT_DATA and not instr.recheck:
+                        continue       # still waiting: none of its producers has finished
+                    instr.recheck  = False
                     instr.substate = InstrState.NONE
                     instr.waiting_for = []
                   
-                    if self.dynamic:   # producers found by renaming at dispatch
-                        for dep_idx in instr.deps:
-                            instr_dep = self.window.find(dep_idx)
-                            if instr_dep and instr_dep.state not in [InstrState.WRITE_BACK, InstrState.RETIRE]:
-                                instr.substate = InstrState.WAIT_DATA
-                                if instr_dep.d_idx not in instr.waiting_for:
-                                    instr.waiting_for.append(instr_dep.d_idx)
+                    refs = instr.dep_refs
+                    if refs is None:   # the first time: the producers that are in the window
+                        if self.dynamic:   # producers found by renaming at dispatch
+                            refs = [self.window.find(dep_idx) for dep_idx in instr.deps]
+                        else:              # producers at fixed distances in the stream
+                            refs = [self.window.get_instr(dynamic_idx - dependence_offset)
+                                    for dependence_offset in self.DepEdges[static_idx]]
+                        # a producer that has written its result (or left the window) stays ready
+                        refs = [r for r in refs if r is not None and r.state not in DONE]
+                        for r in refs:         # each producer wakes this one up when it finishes
+                            if r.waiters is None:
+                                r.waiters = []
+                            r.waiters.append(instr)
                     else:
-                      for dependence_offset in self.DepEdges[static_idx]:
-                        instr_dep = self.window.get_instr( dynamic_idx - dependence_offset )
-                        if not instr_dep: # instruction is no longer in the window
-                            continue
-                        else:
-                            if instr_dep.state not in [InstrState.WRITE_BACK, InstrState.RETIRE]:
-                                instr.substate = InstrState.WAIT_DATA
-                                if instr_dep.d_idx not in instr.waiting_for:
-                                    instr.waiting_for.append(instr_dep.d_idx)
+                        refs = [r for r in refs if r.state not in DONE]
+                    instr.dep_refs = refs
+                    if refs:
+                        instr.substate = InstrState.WAIT_DATA
+                        for instr_dep in refs:
+                            if instr_dep.d_idx not in instr.waiting_for:
+                                instr.waiting_for.append(instr_dep.d_idx)
 
                 if instr.substate != InstrState.WAIT_DATA:
                     port_mask = _program[static_idx].ports
@@ -218,7 +233,7 @@ class Scheduler:
         if sched:  # Improved scheduling algorithm
             issd_isps = ex.old_priority(issue_queue)
             for w_idx in issue_queue:
-                instr          = self.window[w_idx]
+                instr          = window[w_idx]
                 instr.substate = InstrState.NONE
                 if xw:
                     if w_idx in issd_isps:
@@ -252,6 +267,12 @@ class Scheduler:
 
         retires = self.retrWidth - rw
         return retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates
+
+    def _wake(self, instr):
+        # instr has its result: the instructions waiting for it check their producers again
+        if instr.waiters:
+            for waiter in instr.waiters:
+                waiter.recheck = True
 
     def dispatch(self):
         if self.dynamic:

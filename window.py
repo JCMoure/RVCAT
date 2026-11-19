@@ -52,6 +52,9 @@ class InstrInstance:
         self.wrong    = False   # dispatched on a wrong (speculative) path
         self.mispredicted = False   # conditional branch whose prediction fails
         self.checkpoint = None  # renaming table to restore when the misprediction resolves
+        self.dep_refs = None    # producers not finished yet (found once, then only checked)
+        self.waiters  = None    # instructions waiting for the result of this one (they are woken up)
+        self.recheck  = True    # some producer finished: check the producers again
         self.squashed_cycle = None
 
 def __repr__(self) -> str:
@@ -120,10 +123,17 @@ class Window:
         return True
 
     def __getitem__(self, i: int) -> InstrInstance:
-        if i in range(self.count):
+        if 0 <= i < self.count:
             return self.buffer[(i+self.first) % self.size]
         else:
             raise IndexError
+
+    def ordered(self) -> list:
+        # the instructions of the window, from the oldest one
+        end = self.first + self.count
+        if end <= self.size:
+            return self.buffer[self.first:end]
+        return self.buffer[self.first:] + self.buffer[:end - self.size]
 
     def __repr__(self) -> str:
         out = ""
