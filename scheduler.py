@@ -51,6 +51,7 @@ class Scheduler:
         self.sb_senior  = []      # retired stores not written into the cache yet: [d_idx, address]
         self.sb_full_cycles = 0   # cycles in which dispatch waited for a free entry
         self.sb_snapshots = []    # (timeline) occupancy of the store buffer in each cycle
+        self.sb_width   = None    # stores written into the cache per cycle (same block): store ports
         self.port_mask  = 0
         self.n_ports    = 0
         self.cache      = None
@@ -298,15 +299,34 @@ class Scheduler:
         retires = self.retrWidth - rw
         return retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates
 
+    def _store_width(self):
+        # Stores written into the cache in one cycle: as many as the ports that execute stores (the
+        # union of the ports of the STORE instructions of the program), when they go to the same block
+        if self.sb_width is None:
+            mask = 0
+            for instr in _program.instruction_list + _program.epilogue:
+                if instr.type in ("MEM", "VMEM") and instr.oper != "LOAD":
+                    mask |= instr.ports
+            self.sb_width = max(1, bin(mask).count("1"))
+        return self.sb_width
+
     def _drain_store_buffer(self, WriteMisses):
-        # The oldest retired store is written into the cache when its block is there. If the block
+        # The oldest retired store is written into the cache when its block is there; in the same
+        # cycle, the next stores of the same block too, up to the number of store ports. If the block
         # was evicted after the store executed, it is requested again (a new write miss).
         if not self.sb_senior:
             return
         d_idx, address = self.sb_senior[0]
+        block = address // self.blkSize
         if self.cache.write_store(address):
             self.sb_senior.pop(0)
-        elif not self.cache.block_requested(address // self.blkSize):
+            written = 1
+            while self.sb_senior and written < self._store_width() and \
+                    self.sb_senior[0][1] // self.blkSize == block:
+                self.cache.write_store(self.sb_senior[0][1])
+                self.sb_senior.pop(0)
+                written += 1
+        elif not self.cache.block_requested(block):
             self.cache.request_access(3, address, self.cycles, d_idx)
             WriteMisses.append(d_idx)
 
@@ -582,6 +602,7 @@ class Scheduler:
         self.rThru = process.rThru
         self.nStoreBuffers = process.nStoreBuffers
         self.sb_stores, self.sb_senior, self.sb_full_cycles, self.sb_snapshots = 0, [], 0, []
+        self.sb_width = None
         self.sched      = process.sched
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
@@ -706,6 +727,7 @@ class Scheduler:
         self.rThru = process.rThru
         self.nStoreBuffers = process.nStoreBuffers
         self.sb_stores, self.sb_senior, self.sb_full_cycles, self.sb_snapshots = 0, [], 0, []
+        self.sb_width = None
         self.sched      = process.sched
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks

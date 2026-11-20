@@ -66,6 +66,12 @@ class StoreBufferTest(unittest.TestCase):
         t = json.loads(_scheduler.get_timeline(process(40, instruction_list=load), nret=4))
         self.assertIn(':', t['instructions'][0][4])
 
+    def test_stores_of_the_same_block_are_written_together_with_two_store_ports(self):
+        # 8 stores of one block wait for it; then 1 or 2 are written per cycle (as many as store ports)
+        two = [dict(SET[0], ports=ST | (ST << 1))] + SET[1:]
+        one_port, two_ports = results(N=8), results(N=8, instruction_list=two)
+        self.assertEqual(one_port['total_cycles'] - two_ports['total_cycles'], 4)
+
     def test_size_limits(self):
         for bad in (0, 257, 1.5, True):
             with self.assertRaises(ValueError):
