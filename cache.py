@@ -93,8 +93,10 @@ class Cache:
     block_address = block * self.BLOCK_SIZE
     line = self.search(block)
 
-    # access_type: 0 load, 1 store, 2 store of a wrong (speculative) path: it requests the
-    # block for ownership (RFO) like a store, but never writes it (not marked dirty)
+    # access_type: 0 load, 1 store that waits for its block and writes it, 2 store of a wrong
+    # (speculative) path, 3 store of the store buffer: 2 and 3 request the block for ownership (RFO)
+    # but nobody waits for it (they do not use the return throughput) and they do not write it: a
+    # store of the store buffer writes its block later (write_store)
     if line >= 0 and not self.LOADING[line]:
       if access_type == 1:
         self.MODIFIED[line] = 1
@@ -289,7 +291,13 @@ class Cache:
       self.READY_CYCLE[line] = entry["ready_cycle"]
       if any(waiter["access_type"] == 1 for waiter in entry["waiters"]):
         self.MODIFIED[line] = 1
+      waiting = [waiter for waiter in entry["waiters"] if waiter["access_type"] in (0, 1)]
       for waiter in entry["waiters"]:
+        if waiter["access_type"] not in (0, 1):     # a request for ownership: done
+          request = self.instruction_requests.get(waiter["instruction_index"])
+          if request is not None and request.get("block") == entry["block"]:
+            self.instruction_requests.pop(waiter["instruction_index"])
+      for waiter in waiting:
         instruction_index = waiter["instruction_index"]
         self.instruction_requests[instruction_index]["state"] = "return_queue"
         self.return_queue.append({
@@ -297,11 +305,12 @@ class Cache:
           "block": entry["block"],
           "access_type": waiter["access_type"],
         })
-      self.return_waiters[entry["block"]] = {
-        "instruction_indices": {
-          waiter["instruction_index"] for waiter in entry["waiters"]
-        },
-      }
+      if waiting:
+        self.return_waiters[entry["block"]] = {
+          "instruction_indices": {waiter["instruction_index"] for waiter in waiting},
+        }
+      else:                                         # nobody waits: the fill buffer is free
+        self.fill_buffer_slots.pop(entry["block"])
       self.mshrs.pop(entry["block"])
 
     if cycle != self.last_return_cycle:
@@ -357,9 +366,25 @@ class Cache:
 
     for entry in self.mshrs.values():
       for waiter in entry["waiters"]:
-        self.instruction_requests[waiter["instruction_index"]]["state"] = entry["state"]
+        request = self.instruction_requests.get(waiter["instruction_index"])
+        if request is not None:
+          request["state"] = entry["state"]
 
     return writebacks
+
+  def block_requested(self, block):
+    # the block is being fetched (or waits for a fill buffer)
+    return block in self.mshrs or any(miss["block"] == block for miss in self.pending_misses)
+
+  def write_store(self, address):
+    # A store of the store buffer writes its block: True when the block is in the cache (it becomes
+    # dirty and the most recently used); False when it is not there yet
+    line = self.search(address // self.BLOCK_SIZE)
+    if line < 0 or self.LOADING[line]:
+      return False
+    self.MODIFIED[line] = 1
+    self.updateLRU(line)
+    return True
 
   def get_state(self, current_cycle):
     return [

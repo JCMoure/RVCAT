@@ -46,6 +46,11 @@ class Scheduler:
         self.nFillBuffers = 2
         self.nWriteBuffers = 2
         self.rThru = 1
+        self.nStoreBuffers = 16
+        self.sb_stores  = 0       # stores in the ROB (each one has its entry of the store buffer)
+        self.sb_senior  = []      # retired stores not written into the cache yet: [d_idx, address]
+        self.sb_full_cycles = 0   # cycles in which dispatch waited for a free entry
+        self.sb_snapshots = []    # (timeline) occupancy of the store buffer in each cycle
         self.port_mask  = 0
         self.n_ports    = 0
         self.cache      = None
@@ -90,6 +95,9 @@ class Scheduler:
                         instr.state    = InstrState.RETIRE
                         instr.substate = InstrState.NONE
                         rw -= 1
+                        if instr.memory == 2 and self.cache is not None:
+                            self.sb_stores -= 1
+                            self.sb_senior.append([dynamic_idx, instr.memAddr])
                     else:
                         instr.substate = InstrState.WAIT_RETIRE
                 else:
@@ -139,8 +147,10 @@ class Scheduler:
                     instr.latency -= 1
                     if instr.latency <= 0:
                         access = instr.memory - 1
-                        if instr.wrong and instr.memory == 2:
-                            access = 2   # wrong-path store: requests the block (RFO), never writes it
+                        if instr.memory == 2:
+                            # the store goes to the store buffer: it only requests its block (RFO);
+                            # a wrong-path store never writes it
+                            access = 2 if instr.wrong else 3
                         result = self.cache.request_access(
                             access,
                             instr.memAddr,
@@ -152,17 +162,18 @@ class Scheduler:
                             self.wp[kind] += 1
                             if result != "hit":
                                 self.wp[kind[:-1] + "_misses"] += 1
-                        if result == "hit":
-                            instr.state = InstrState.WRITE_BACK
-                            self._wake(instr)
-                            instr.substate = InstrState.NONE
-                        else:
+                        if result != "hit":
                             if instr.memory == 1:
                                 ReadMisses.append(dynamic_idx)
                             else:
                                 WriteMisses.append(dynamic_idx)
                             if result in ("merged", "secondary"):
                                 SecondMisses.append(dynamic_idx)
+                        if result == "hit" or instr.memory == 2:   # a store does not wait for its block
+                            instr.state = InstrState.WRITE_BACK
+                            self._wake(instr)
+                            instr.substate = InstrState.NONE
+                        else:
                             instr.substate = (
                                 InstrState.WAIT_CACHE_2ND
                                 if result == "secondary"
@@ -281,10 +292,37 @@ class Scheduler:
             self._resolve(branch)
 
         if self.cache is not None:
+            self._drain_store_buffer(WriteMisses)
             MMupdates.extend(self.cache.advance(self.cycles))
 
         retires = self.retrWidth - rw
         return retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates
+
+    def _drain_store_buffer(self, WriteMisses):
+        # The oldest retired store is written into the cache when its block is there. If the block
+        # was evicted after the store executed, it is requested again (a new write miss).
+        if not self.sb_senior:
+            return
+        d_idx, address = self.sb_senior[0]
+        if self.cache.write_store(address):
+            self.sb_senior.pop(0)
+        elif not self.cache.block_requested(address // self.blkSize):
+            self.cache.request_access(3, address, self.cycles, d_idx)
+            WriteMisses.append(d_idx)
+
+    def _sb_full(self, instr):
+        # a store needs a free entry of the store buffer to be dispatched
+        if self.cache is None or not (instr.type in ("MEM", "VMEM") and instr.oper != "LOAD"):
+            return False
+        return self.sb_stores + len(self.sb_senior) >= self.nStoreBuffers
+
+    def _sb_snapshot(self):
+        if self.cache is not None:
+            self.sb_snapshots.append({
+                "cycle": self.cycles,
+                "stores": self.sb_stores,
+                "retired": [d for d, _ in self.sb_senior],
+            })
 
     def _start_progress(self):
         self.progress_fn = _progress_function()
@@ -314,6 +352,11 @@ class Scheduler:
             instr_mem  = 0
             addr       = -1
             instr      = _program[static_idx]
+            if self._sb_full(instr):
+                self.sb_full_cycles += 1
+                break
+            if instr.type in ("MEM", "VMEM") and instr.oper != "LOAD" and self.cache is not None:
+                self.sb_stores += 1      # the store takes an entry of the store buffer
             if instr.type == "MEM" or instr.type == "VMEM":
                 instr_mem  = 1 if instr.oper == "LOAD" else 2
                 addr       = instr.addr
@@ -402,8 +445,9 @@ class Scheduler:
 
         ExecGraph     = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
-        while retired < self.n:
+        while retired < self.n or self.sb_senior:
             retires, used_ports, _,_,_,_ = self.next_cycle()
+            self._sb_snapshot()
 
             if self.cache is not None:
                 cache_cycle = self.cycles
@@ -536,6 +580,8 @@ class Scheduler:
         self.nFillBuffers = process.nFillBuffers
         self.nWriteBuffers = process.nWriteBuffers
         self.rThru = process.rThru
+        self.nStoreBuffers = process.nStoreBuffers
+        self.sb_stores, self.sb_senior, self.sb_full_cycles, self.sb_snapshots = 0, [], 0, []
         self.sched      = process.sched
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
@@ -635,6 +681,10 @@ class Scheduler:
                 "capacity": self.cache.WRITE_BUFFER_COUNT,
                 "snapshots": self.write_buffer_snapshots,
             }
+            timelineJson["resource_usage"]["store_buffer"] = {
+                "capacity": self.nStoreBuffers,
+                "snapshots": self.sb_snapshots,
+            }
 
         return json.dumps(timelineJson)
 
@@ -654,6 +704,8 @@ class Scheduler:
         self.nFillBuffers = process.nFillBuffers
         self.nWriteBuffers = process.nWriteBuffers
         self.rThru = process.rThru
+        self.nStoreBuffers = process.nStoreBuffers
+        self.sb_stores, self.sb_senior, self.sb_full_cycles, self.sb_snapshots = 0, [], 0, []
         self.sched      = process.sched
         self.blkSize    = process.blkSize
         self.nBlocks    = process.nBlocks
@@ -706,7 +758,7 @@ class Scheduler:
         ExecGraph  = ex.generate_execution_graph( self.num_instr, self.n, self.window_size, self.DepEdges )
 
         self._start_progress()
-        while retired < self.n:
+        while retired < self.n or self.sb_senior:
             self._report(retired / self.n)
             retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates = self.next_cycle()
             secondary_misses = set(SecondMisses)
@@ -798,6 +850,7 @@ class Scheduler:
         out["MM_Reads"]       = mm_reads
         out["MM_Writes"]      = mm_writes
         out["MM_usage_percent"] = 100 * len(mm_busy_cycles) / self.cycles
+        out["store_buffer_full_cycles"] = self.sb_full_cycles if self.cache is not None else 0
 
         out["critical_path"]   = ex.critical_path_statistics_json(
             self.num_instr, _program.instruction_list, critical_path, self.iterations
@@ -899,9 +952,14 @@ class Scheduler:
                     break
                 k, s = self.cursor
             instr = _program[s]
+            if self._sb_full(instr):
+                self.sb_full_cycles += 1
+                break
             mem, addr = 0, -1
             if instr.type == "MEM" or instr.type == "VMEM":
                 mem  = 1 if instr.oper == "LOAD" else 2
+                if mem == 2 and self.cache is not None:
+                    self.sb_stores += 1
                 r, kk = divmod(k, self.iters_rep) if self.reps > 1 else (0, k)   # repetition, and iteration in it
                 if s >= self.num_instr:                 # the block after the call: once per call
                     kk = 0
@@ -979,6 +1037,8 @@ class Scheduler:
         removed = self.window.truncate_after(branch.d_idx)
         for r in removed:
             r.squashed_cycle = self.cycles
+            if r.memory == 2 and self.cache is not None:
+                self.sb_stores -= 1
             if r.state != InstrState.DISPATCH:
                 self.wp["executed"] += 1
             if self.cache is not None:
@@ -1025,7 +1085,7 @@ class Scheduler:
         wrong_ids = lambda idx: self.rows[idx].wrong if idx < len(self.rows) else False
 
         self._start_progress()
-        while not (self.dispatch_done and self.window.count == 0):
+        while not (self.dispatch_done and self.window.count == 0) or self.sb_senior:
             if retired:
                 self._report((retired[-1].iteration + 1) / self.iterations)
             retires, used_ports, ReadMisses, SecondMisses, WriteMisses, MMupdates = self.next_cycle()
@@ -1098,6 +1158,7 @@ class Scheduler:
         out["MM_Reads"]       = sum(request["operation"] != "write" for request in mm_requests)
         out["MM_Writes"]      = sum(request["operation"] == "write" for request in mm_requests)
         out["MM_usage_percent"] = 100 * len(mm_busy_cycles) / self.cycles
+        out["store_buffer_full_cycles"] = self.sb_full_cycles if self.cache is not None else 0
         out["branch"]         = self._branch_statistics()
         out["repetitions"]    = self.reps
         out["iterations_per_repetition"] = self.iters_rep
@@ -1149,6 +1210,7 @@ class Scheduler:
 
         while not (self.dispatch_done and self.window.count == 0) and (nret is None or retired < nret):
             retires, used_ports, _, _, _, _ = self.next_cycle()
+            self._sb_snapshot()
             if self.cache is not None:
                 cache_state = self.cache.get_state(self.cycles)
                 signature = tuple((line["valid"], line["address"], line["dirty"], line["lru"],
@@ -1181,6 +1243,24 @@ class Scheduler:
                 record(instr)
             if self.cycles > 10**6:
                 raise RuntimeError("simulation does not finish")
+
+        while self.sb_senior and self.cache is not None:
+            self.cache.advance(self.cycles)
+            self._drain_store_buffer([])
+            self.cache.advance(self.cycles)
+            self._sb_snapshot()
+            cache_state = self.cache.get_state(self.cycles)
+            signature = tuple((line["valid"], line["address"], line["dirty"], line["lru"],
+                               line["ready_cycle"], line["loading"]) for line in cache_state)
+            if signature != last_cache_state:
+                cache_states.append({"cycle": self.cycles, "lines": cache_state})
+                last_cache_state = signature
+            buffer_state = self.cache.get_buffer_state()
+            self.fill_buffer_snapshots.append({"cycle": self.cycles, "slots": buffer_state["fill"]})
+            self.write_buffer_snapshots.append({"cycle": self.cycles, "slots": buffer_state["write"]})
+            for port in port_timeline:
+                port_timeline[port].append(False)
+            self.cycles += 1
 
         rows = self.rows[:last_retired_d + 1]
         ExecGraph = ex.build_rows_graph(self._graph_rows(rows), self.window_size)
@@ -1233,6 +1313,8 @@ class Scheduler:
                                                               "snapshots": self.fill_buffer_snapshots}
             timelineJson["resource_usage"]["write_buffers"] = {"capacity": self.cache.WRITE_BUFFER_COUNT,
                                                                "snapshots": self.write_buffer_snapshots}
+            timelineJson["resource_usage"]["store_buffer"] = {"capacity": self.nStoreBuffers,
+                                                              "snapshots": self.sb_snapshots}
         return json.dumps(timelineJson)
 
 _scheduler = Scheduler()

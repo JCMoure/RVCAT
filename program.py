@@ -92,7 +92,8 @@ class Process:
         self.mPenalty   = 1     # memory penalty (latency in cycles) for a cache miss
         self.nFillBuffers = 2   # maximum number of concurrent cache-block fills
         self.nWriteBuffers = 2 # maximum number of pending dirty-block writebacks
-        self.rThru = 1          # maximum number of returned memory instructions per cycle
+        self.rThru = 1          # maximum number of LOADs that receive their data from the fill buffers per cycle
+        self.nStoreBuffers = 16 # entries of the store buffer (stores from dispatch until written into the cache)
         self.bPenalty = 5       # cycles to refill the front-end after a mispredicted branch resolves
         self.speculation = "stall"  # simulation option: "stall" or "wrong-path" after a misprediction
         self.rep = 1            # repetitions of the whole loop (calls of the function)
@@ -117,6 +118,7 @@ class Process:
         process.nFillBuffers     = data.get("nFillBuffers", 2)
         process.nWriteBuffers    = data.get("nWriteBuffers", 2)
         process.rThru            = data.get("rThru", 1)
+        process.nStoreBuffers    = data.get("nStoreBuffers", 16)
         process.bPenalty         = data.get("bPenalty", 5)
         process.speculation      = data.get("speculation", "stall")
         if process.speculation not in ("stall", "wrong-path"):
@@ -129,6 +131,9 @@ class Process:
         if isinstance(process.rThru, bool) or not isinstance(process.rThru, int) or \
                 not 1 <= process.rThru <= 32:
             raise ValueError("rThru must be an integer between 1 and 32.")
+        if isinstance(process.nStoreBuffers, bool) or not isinstance(process.nStoreBuffers, int) or \
+                not 1 <= process.nStoreBuffers <= 256:
+            raise ValueError("nStoreBuffers must be an integer between 1 and 256.")
         process.rep              = data.get("rep", 1)
         process.repIndependent   = data.get("repIndependent", True)
         process.repStrides       = data.get("repStrides", {}) or {}
@@ -160,6 +165,7 @@ class Process:
             "mIssueTime":       self.mIssueTime,
             "nFillBuffers":     self.nFillBuffers,
             "nWriteBuffers":    self.nWriteBuffers,
+            "nStoreBuffers":    self.nStoreBuffers,
             "rThru":            self.rThru,
             "bPenalty":         self.bPenalty,
             "speculation":      self.speculation,
