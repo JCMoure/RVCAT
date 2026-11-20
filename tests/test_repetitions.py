@@ -88,8 +88,10 @@ class RepetitionTest(unittest.TestCase):
 
     def test_size_limits(self):
         with self.assertRaises(ValueError):
-            results(N=1000, rep=21)                 # 21 × 500 iterations > 10,000
-        results(N=1000, rep=20)                     # 20 × 500 = 10,000: allowed
+            results(N=1000, rep=58)                 # 58 × 500 iterations × 7 instructions = 203,000 > 200,000
+        with self.assertRaises(ValueError):         # 57 × (3,500 + 10 instructions of the block) = 200,070 > 200,000
+            results(N=1000, rep=57, epilogue=EPILOGUE * 10)
+        results(N=20, rep=50)                       # 50 × 10 × 7 = 3,500: allowed
         with self.assertRaises(ValueError):
             results(rep=0)
         with self.assertRaises(ValueError):

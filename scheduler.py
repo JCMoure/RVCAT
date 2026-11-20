@@ -21,9 +21,11 @@ REPORT_EVERY = 0.2     # seconds between two reports of progress
 
 global _scheduler
 
-# Repetitions of the loop: at most this number of iterations in all (the simulation takes about
-# 0.6 ms per iteration natively, 2 to 4 times more in the browser)
-MAX_REP_ITERATIONS = 10000
+# Repetitions of the loop: at most this number of simulated instructions in all, Rep x (iterations
+# x instructions of the loop + instructions of the block after each call). The time of a simulation
+# grows with the simulated instructions (e.g. 20,000 iterations of 10 instructions: about 15 s in
+# the browser, 4 to 5 times less natively)
+MAX_REP_INSTRUCTIONS = 200000
 
 # states of an instruction that has its result (its consumers can execute)
 DONE = (InstrState.WRITE_BACK, InstrState.RETIRE)
@@ -838,8 +840,10 @@ class Scheduler:
         if self.reps > 1 or self.n_epi > 0 or process.forceDynamic:
             self.iters_rep = max(1, process.Nloop // _program.loop_stride)   # iterations of one call
             self.iterations = self.iters_rep * self.reps
-            if self.reps > 1 and self.iterations > MAX_REP_ITERATIONS:
-                raise ValueError(f"Repetitions × iterations must be at most {MAX_REP_ITERATIONS:,}.")
+            simulated = self.reps * (self.iters_rep * _program.n + self.n_epi)
+            if self.reps > 1 and simulated > MAX_REP_INSTRUCTIONS:
+                raise ValueError(f"Repetitions × (iterations × instructions of the loop + instructions of the block) "
+                                 f"must be at most {MAX_REP_INSTRUCTIONS:,} (it is {simulated:,}).")
         every             = _program.instruction_list + _program.epilogue
         self.rep_bytes    = [getattr(inst, "rep_byte_stride", 0) for inst in every]
         self.skips        = dict(branches)
