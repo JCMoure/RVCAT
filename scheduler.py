@@ -669,6 +669,11 @@ class Scheduler:
         timelineJson["arrays"]       = _program.arrays
         timelineJson["critical_path_graph"] = ex.serialize_execution_graph(ExecGraph, self.n)
         timelineJson["wait_details"] = self.wait_details
+        # the instructions (rows) whose results each instruction reads: fixed distances in the stream
+        timelineJson["producers"] = [
+            sorted({i - off for off in self.DepEdges[i % self.num_instr] if i - off >= 0})
+            for i in range(len(instructions))
+        ]
         timelineJson["resource_usage"] = {
             "ports": port_timeline,
             "port_owners": {
@@ -1309,6 +1314,8 @@ class Scheduler:
             "arrays": _program.arrays,
             "critical_path_graph": ex.serialize_execution_graph(ExecGraph, len(rows)),
             "wait_details": self.wait_details,
+            # the instructions (rows) whose results each instruction reads: found by renaming at dispatch
+            "producers": [sorted(set(r.deps or [])) for r in rows if states.get(r.d_idx)],
             "branch": self._branch_statistics(),
             "repetitions": self.reps,
             "iterations_per_repetition": self.iters_rep,
