@@ -51,6 +51,7 @@ class Scheduler:
         self.sb_senior  = []      # retired stores not written into the cache yet: [d_idx, address]
         self.sb_full_cycles = 0   # cycles in which dispatch waited for a free entry
         self.sb_snapshots = []    # (timeline) occupancy of the store buffer in each cycle
+        self.timeline_cache_lines = True   # (timeline) snapshots of the lines of the cache
         self.sb_width   = None    # stores written into the cache per cycle (same block): store ports
         self.port_mask  = 0
         self.n_ports    = 0
@@ -471,18 +472,19 @@ class Scheduler:
 
             if self.cache is not None:
                 cache_cycle = self.cycles
-                cache_state = self.cache.get_state(cache_cycle)
-                cache_signature = tuple(
-                    (line["valid"], line["address"], line["dirty"], line["lru"],
-                     line["ready_cycle"], line["loading"])
-                    for line in cache_state
-                )
-                if cache_signature != last_cache_state:
-                    cache_states.append({
-                        "cycle": cache_cycle,
-                        "lines": cache_state,
-                    })
-                    last_cache_state = cache_signature
+                if self.timeline_cache_lines:
+                    cache_state = self.cache.get_state(cache_cycle)
+                    cache_signature = tuple(
+                        (line["valid"], line["address"], line["dirty"], line["lru"],
+                         line["ready_cycle"], line["loading"])
+                        for line in cache_state
+                    )
+                    if cache_signature != last_cache_state:
+                        cache_states.append({
+                            "cycle": cache_cycle,
+                            "lines": cache_state,
+                        })
+                        last_cache_state = cache_signature
                 buffer_state = self.cache.get_buffer_state()
                 self.fill_buffer_snapshots.append({
                     "cycle": cache_cycle,
@@ -581,10 +583,14 @@ class Scheduler:
 
         return timeline, port_timeline, INSTR_Info, critical_path, ExecGraph, cache_states
 
-    def get_timeline(self, processJSON, niters: int = 3, nret=None) -> str:
+    def get_timeline(self, processJSON, niters: int = 3, nret=None, cache_lines: bool = True) -> str:
+        # cache_lines=False: no snapshots of the lines of the cache (resource_usage.cache_state has
+        # its line_count and no snapshots). They grow with cycles x lines, and a compact view of a
+        # long timeline does not show them; the MM transfers and the buffers are kept
 
         if nret is not None and (isinstance(nret, bool) or not isinstance(nret, int) or nret < 1):
             raise ValueError("nret must be a positive integer.")
+        self.timeline_cache_lines = bool(cache_lines)
 
         process = Process.from_json(processJSON)
         _program.load_instruction_list(process.instruction_list)
@@ -1239,12 +1245,13 @@ class Scheduler:
             retires, used_ports, _, _, _, _ = self.next_cycle()
             self._sb_snapshot()
             if self.cache is not None:
-                cache_state = self.cache.get_state(self.cycles)
-                signature = tuple((line["valid"], line["address"], line["dirty"], line["lru"],
-                                   line["ready_cycle"], line["loading"]) for line in cache_state)
-                if signature != last_cache_state:
-                    cache_states.append({"cycle": self.cycles, "lines": cache_state})
-                    last_cache_state = signature
+                if self.timeline_cache_lines:
+                    cache_state = self.cache.get_state(self.cycles)
+                    signature = tuple((line["valid"], line["address"], line["dirty"], line["lru"],
+                                       line["ready_cycle"], line["loading"]) for line in cache_state)
+                    if signature != last_cache_state:
+                        cache_states.append({"cycle": self.cycles, "lines": cache_state})
+                        last_cache_state = signature
                 buffer_state = self.cache.get_buffer_state()
                 self.fill_buffer_snapshots.append({"cycle": self.cycles, "slots": buffer_state["fill"]})
                 self.write_buffer_snapshots.append({"cycle": self.cycles, "slots": buffer_state["write"]})
@@ -1276,12 +1283,13 @@ class Scheduler:
             self._drain_store_buffer([])
             self.cache.advance(self.cycles)
             self._sb_snapshot()
-            cache_state = self.cache.get_state(self.cycles)
-            signature = tuple((line["valid"], line["address"], line["dirty"], line["lru"],
-                               line["ready_cycle"], line["loading"]) for line in cache_state)
-            if signature != last_cache_state:
-                cache_states.append({"cycle": self.cycles, "lines": cache_state})
-                last_cache_state = signature
+            if self.timeline_cache_lines:
+                cache_state = self.cache.get_state(self.cycles)
+                signature = tuple((line["valid"], line["address"], line["dirty"], line["lru"],
+                                   line["ready_cycle"], line["loading"]) for line in cache_state)
+                if signature != last_cache_state:
+                    cache_states.append({"cycle": self.cycles, "lines": cache_state})
+                    last_cache_state = signature
             buffer_state = self.cache.get_buffer_state()
             self.fill_buffer_snapshots.append({"cycle": self.cycles, "slots": buffer_state["fill"]})
             self.write_buffer_snapshots.append({"cycle": self.cycles, "slots": buffer_state["write"]})
