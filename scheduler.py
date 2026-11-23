@@ -338,11 +338,23 @@ class Scheduler:
         return self.sb_stores + len(self.sb_senior) >= self.nStoreBuffers
 
     def _sb_snapshot(self):
+        # head_state: what the oldest retired store waits for (None: nothing, its block is in the
+        # cache): the state of its request for ownership (queued_fill: no free fill buffer, queued_line,
+        # queued_write, waiting_mm, waiting_writeback, reading: the block is coming)
         if self.cache is not None:
+            state = None
+            if self.sb_senior:
+                head, address = self.sb_senior[0]
+                state = self.cache.get_request_state(head)
+                block = address // self.blkSize
+                if state is None and self.cache.block_requested(block):
+                    # its block is brought by the miss of another instruction
+                    state = "reading" if block in self.cache.mshrs else "queued_fill"
             self.sb_snapshots.append({
                 "cycle": self.cycles,
                 "stores": self.sb_stores,
                 "retired": [d for d, _ in self.sb_senior],
+                "head_state": state,
             })
 
     def _start_progress(self):
@@ -1278,7 +1290,17 @@ class Scheduler:
             if self.cycles > 10**6:
                 raise RuntimeError("simulation does not finish")
 
+        # The retired stores are written from the store buffer. The instructions still in flight are
+        # not simulated any more: their requests to the cache are cancelled (orphans: they finish and
+        # free their fill buffers), or a LOAD waiting for its data would keep its fill buffer forever,
+        # and a store that misses would never get one
+        if self.cache is not None and self.sb_senior:
+            for instr in self.window:
+                self.cache.cancel(instr.d_idx)
+        drain_limit = self.cycles + 100000
         while self.sb_senior and self.cache is not None:
+            if self.cycles > drain_limit:
+                raise RuntimeError("the store buffer is not written into the cache")
             self.cache.advance(self.cycles)
             self._drain_store_buffer([])
             self.cache.advance(self.cycles)
