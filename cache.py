@@ -47,6 +47,9 @@ class Cache:
     self.last_advance_cycle = None
     self.last_return_cycle = None
     self.protected_lines_this_cycle = set()
+    # (the critical path) the last fill buffer freed: { cycle, block, instruction_index (the
+    # instruction whose data freed it; None: nobody waited) }
+    self.last_fill_release = None
 
     for line in range(self.CACHE_SIZE):
       self.LRU[line] = line
@@ -195,6 +198,7 @@ class Cache:
       if not return_fill["instruction_indices"]:
         self.return_waiters.pop(request["block"])
         self.fill_buffer_slots.pop(request["block"])
+        self._fill_released(request["block"], instruction_index)
     return True
 
   def _admit_pending_misses(self, cycle, writebacks):
@@ -209,6 +213,12 @@ class Cache:
         break
 
       self.pending_misses.pop(0)
+      # (the critical path) a miss that waited to be admitted: what let it in, if a fill buffer was
+      # freed in this cycle
+      if cycle > entry["requested_cycle"]:
+        freed = self.last_fill_release
+        entry["admission"] = {"cycle": int(cycle), "requested": int(entry["requested_cycle"]),
+                              "fill_freed": dict(freed) if freed and freed["cycle"] == cycle else None}
       entry["line"] = line
       entry["state"] = "waiting_writeback" if dirty_victim else "queued"
       self.mshrs[entry["block"]] = entry
@@ -253,6 +263,10 @@ class Cache:
 
       if not dirty_victim:
         self._enqueue_read(entry)
+
+  def _fill_released(self, block, instruction_index):
+    self.last_fill_release = {"cycle": self.last_advance_cycle, "block": int(block) * self.BLOCK_SIZE,
+                              "instruction_index": instruction_index}
 
   @staticmethod
   def _free_slot(active_slots, count):
@@ -311,6 +325,7 @@ class Cache:
         }
       else:                                         # nobody waits: the fill buffer is free
         self.fill_buffer_slots.pop(entry["block"])
+        self._fill_released(entry["block"], None)
       self.mshrs.pop(entry["block"])
 
     if cycle != self.last_return_cycle:
@@ -360,6 +375,8 @@ class Cache:
           "instruction_indices": instruction_indices,
           "duration": int(request["duration"]),
         }
+        if request["operation"] != "write" and entry.get("admission"):
+          request_record["admission"] = entry["admission"]
         self.MEM_requests.append(request_record)
         if request["operation"] != "write":
           entry["request_record"] = request_record

@@ -45,6 +45,7 @@ class InstrInstance:
         self.exec_lat = 0       # statistic of total execution latency, including waiting for resources
         self.waiting_for = []
         self.waiting_ports = []
+        self.port_blockers = []    # (the critical path) the instructions that had those ports in the cycle
         self.port_uses = []
         # programs with conditional branches (dynamic dispatch)
         self.iteration = None   # loop iteration of the instruction

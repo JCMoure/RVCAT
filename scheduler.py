@@ -52,6 +52,8 @@ class Scheduler:
         self.sb_full_cycles = 0   # cycles in which dispatch waited for a free entry
         self.sb_snapshots = []    # (timeline) occupancy of the store buffer in each cycle
         self.timeline_cache_lines = True   # (timeline) snapshots of the lines of the cache
+        self.dispatch_stalls = None        # (timeline) why the dispatch stops in a cycle (the critical path)
+        self.stall_branch    = None        # the mispredicted branch whose penalty is being paid
         self.sb_width   = None    # stores written into the cache per cycle (same block): store ports
         self.port_mask  = 0
         self.n_ports    = 0
@@ -76,6 +78,7 @@ class Scheduler:
         issue_queue = {}
         resolved    = []   # mispredicted branches that finish their execution in this cycle
         used_ports  = {port:False for port in range(32) if (self.port_mask >> port) & 1}
+        port_owner  = {}   # (the critical path) port -> the instruction that starts in it in this cycle
         ReadMisses  = []
         SecondMisses= []
         WriteMisses = []
@@ -230,6 +233,7 @@ class Scheduler:
                         for port in required_ports:
                             if not used_ports[port]:
                                 used_ports[port] = True
+                                port_owner[port] = dynamic_idx
                                 instr.exec_cycle = self.cycles
                                 instr.latency    = latency
                                 instr.exec_lat  += latency
@@ -247,10 +251,12 @@ class Scheduler:
                             instr.waiting_ports = [
                                 port for port in required_ports if used_ports[port]
                             ] or required_ports
+                            instr.port_blockers = sorted({port_owner[p] for p in instr.waiting_ports if p in port_owner})
                             instr.exec_lat += 1
                       else:   # all the ports are busy (issue width = number of ports): a port conflict
                         instr.substate  = InstrState.WAIT_RESOURCE
                         instr.waiting_ports = required_ports
+                        instr.port_blockers = sorted({port_owner[p] for p in required_ports if p in port_owner})
                         instr.exec_lat += 1
 
                     else:   # Optimal scheduling: first priority is age, second is using most ports
@@ -272,6 +278,7 @@ class Scheduler:
                         instr.port_used  = port
                         instr.port_uses.append((self.cycles, port))
                         used_ports[port] = True
+                        port_owner[port] = instr.d_idx
                         instr.exec_cycle = self.cycles
                         if instr.memory > 0:
                             instr.state = InstrState.LOAD if instr.memory == 1 else InstrState.STORE
@@ -289,6 +296,12 @@ class Scheduler:
                     instr.substate = InstrState.WAIT_RESOURCE
                     instr.waiting_ports = issue_queue[w_idx]
                     instr.exec_lat += 1
+            # (the critical path) who had the ports that a waiting instruction needed (known now:
+            # the optimal scheduler assigns all the ports of the cycle at once)
+            for w_idx in issue_queue:
+                instr = window[w_idx]
+                if instr.substate == InstrState.WAIT_RESOURCE:
+                    instr.port_blockers = sorted({port_owner[p] for p in instr.waiting_ports if p in port_owner})
 
         for branch in resolved:
             self._resolve(branch)
@@ -330,6 +343,28 @@ class Scheduler:
         elif not self.cache.block_requested(block):
             self.cache.request_access(3, address, self.cycles, d_idx)
             WriteMisses.append(d_idx)
+
+    def _note_dispatch_stall(self, stop, dw, last_d):
+        # (timeline, the critical path) the next instruction is not dispatched in this cycle: why, and
+        # the instruction that holds it back. width: the dispatch width is used (last_d, the last one
+        # dispatched); rob: the ROB is full (the oldest one, that must retire); sb: the store buffer is
+        # full (its oldest store); branch: the penalty of a mispredicted branch; branch-wait: a
+        # mispredicted branch not resolved yet (option stall)
+        window = self.window.ordered()
+        if dw == 0:
+            reason, blocker = "width", last_d
+        elif self.window.is_full():
+            reason, blocker = "rob", window[0].d_idx if window else None
+        elif stop == "sb":
+            stores = [i.d_idx for i in window if i.memory == 2]
+            reason, blocker = "sb", self.sb_senior[0][0] if self.sb_senior else (stores[0] if stores else None)
+        elif stop == "branch":
+            reason, blocker = "branch", self.stall_branch
+        elif stop == "branch-wait":
+            reason, blocker = "branch-wait", self.blocked_by
+        else:
+            reason, blocker = stop or "other", None
+        self.dispatch_stalls.append({"cycle": int(self.cycles), "reason": reason, "blocker": blocker})
 
     def _sb_full(self, instr):
         # a store needs a free entry of the store buffer to be dispatched
@@ -380,6 +415,7 @@ class Scheduler:
         if self.dynamic:
             return self._dispatch_dynamic()
         dw = self.dispWidth
+        stop = None
         while self.dispatched < self.n and dw and not self.window.is_full():
             static_idx = self.pc % self.num_instr
             instr_mem  = 0
@@ -387,6 +423,7 @@ class Scheduler:
             instr      = _program[static_idx]
             if self._sb_full(instr):
                 self.sb_full_cycles += 1
+                stop = "sb"
                 break
             if instr.type in ("MEM", "VMEM") and instr.oper != "LOAD" and self.cache is not None:
                 self.sb_stores += 1      # the store takes an entry of the store buffer
@@ -400,6 +437,8 @@ class Scheduler:
             dw      -= 1
             self.dispatched +=1
 
+        if self.dispatch_stalls is not None and self.dispatched < self.n:
+            self._note_dispatch_stall(stop, dw, self.pc - 1)
         self.cycles += 1
 
     def generate_timeline_state ( self, dynamic_idx, stages, critical_path):
@@ -556,6 +595,7 @@ class Scheduler:
                             "instruction_index": instr.d_idx,
                             "reason": "ports",
                             "ports": instr.waiting_ports,
+                            "blockers": instr.port_blockers,
                         })
                     elif instr.substate == InstrState.WAIT_BANDWIDTH:
                         self.wait_details.append({
@@ -603,6 +643,8 @@ class Scheduler:
         if nret is not None and (isinstance(nret, bool) or not isinstance(nret, int) or nret < 1):
             raise ValueError("nret must be a positive integer.")
         self.timeline_cache_lines = bool(cache_lines)
+        self.dispatch_stalls = []          # recorded only for the timeline
+        self.stall_branch    = None
 
         process = Process.from_json(processJSON)
         _program.load_instruction_list(process.instruction_list)
@@ -730,9 +772,12 @@ class Scheduler:
                 "snapshots": self.sb_snapshots,
             }
 
+        timelineJson["dispatch_stalls"] = self.dispatch_stalls or []
+        self.dispatch_stalls = None
         return json.dumps(timelineJson)
 
     def get_results(self, processJSON, niters: int = 3) -> str:
+        self.dispatch_stalls = None        # (only the timeline records them)
 
         process = Process.from_json(processJSON)
         _program.load_instruction_list(process.instruction_list)
@@ -984,13 +1029,16 @@ class Scheduler:
 
     def _dispatch_dynamic(self):
         dw = self.dispWidth
+        stop = None
         while dw and not self.window.is_full():
             if self.cycles < self.stall_until or self.blocked_by is not None:
+                stop = "branch" if self.blocked_by is None else "branch-wait"
                 break
             wrong = self.wrong_cursor is not None
             if wrong:
                 k, s = self.wrong_cursor
                 if k >= self.iterations:          # the wrong path leaves the loop
+                    stop = "other"
                     break
             else:
                 if self.dispatch_done:
@@ -999,6 +1047,7 @@ class Scheduler:
             instr = _program[s]
             if self._sb_full(instr):
                 self.sb_full_cycles += 1
+                stop = "sb"
                 break
             mem, addr = 0, -1
             if instr.type == "MEM" or instr.type == "VMEM":
@@ -1067,6 +1116,8 @@ class Scheduler:
             else:
                 self.cursor = nxt
 
+        if self.dispatch_stalls is not None and not self.dispatch_done:
+            self._note_dispatch_stall(stop, dw, self.next_d - 1)
         self.cycles += 1
 
     def _next_call(self, k):
@@ -1095,6 +1146,7 @@ class Scheduler:
         self.wrong_cursor = None
         self.blocked_by   = None
         self.stall_until  = self.cycles + self.bPenalty
+        self.stall_branch = branch.d_idx
 
     def _branch_statistics(self):
         return {
@@ -1241,7 +1293,8 @@ class Scheduler:
                                               "reason": reason, "dependencies": instr.waiting_for})
                 elif reason == "ports":
                     self.wait_details.append({"cycle": self.cycles - 1, "instruction_index": instr.d_idx,
-                                              "reason": reason, "ports": instr.waiting_ports})
+                                              "reason": reason, "ports": instr.waiting_ports,
+                                              "blockers": instr.port_blockers})
                 elif reason is not None:
                     self.wait_details.append({"cycle": self.cycles - 1, "instruction_index": instr.d_idx,
                                               "reason": reason})
@@ -1374,6 +1427,8 @@ class Scheduler:
                                                                "snapshots": self.write_buffer_snapshots}
             timelineJson["resource_usage"]["store_buffer"] = {"capacity": self.nStoreBuffers,
                                                               "snapshots": self.sb_snapshots}
+        timelineJson["dispatch_stalls"] = self.dispatch_stalls or []
+        self.dispatch_stalls = None
         return json.dumps(timelineJson)
 
 _scheduler = Scheduler()
