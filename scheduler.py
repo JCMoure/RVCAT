@@ -684,7 +684,13 @@ class Scheduler:
             self.cache = None
             
         self.num_instr  = _program.n
-        self.n          = nret if nret is not None else niters*self.num_instr
+        # the timeline is not longer than the program: N/S iterations (with repetitions, all the calls);
+        # nret only cuts a longer one
+        self.timeline_iterations = max(1, process.Nloop // max(1, _program.loop_stride))
+        if nret is None:
+            self.n = niters*self.num_instr
+        else:
+            self.n = min(nret, self.timeline_iterations*self.num_instr)
         self.pc         = 0
         self.cycles     = 0
         self.dispatched = 0
@@ -1267,10 +1273,10 @@ class Scheduler:
         return json.dumps(out)
 
     def _timeline_dynamic(self, ports, nret):
-        # the timeline is limited by retired instructions (nret), not by iterations: each iteration
-        # retires at least one instruction, so nret iterations are always enough
+        # the timeline simulates the iterations of the program (N/S; with repetitions or a block after
+        # the loop, _setup_dynamic has set them for all the calls), cut at nret retired instructions
         if nret is not None and self.reps == 1 and not self.n_epi:
-            self.iterations = max(self.iterations, nret)
+            self.iterations = self.timeline_iterations
         states        = {}
         port_timeline = {port: [] for port in ports}
         cache_states  = []

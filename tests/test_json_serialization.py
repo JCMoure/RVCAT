@@ -406,11 +406,22 @@ class JsonSerializationTests(unittest.TestCase):
         )
 
     def test_timeline_can_simulate_exactly_100_dynamic_instructions(self):
-        timeline = json.loads(Scheduler().get_timeline(load_process(), nret=100))
+        process = load_process()
+        process["Nloop"] = 100            # (the timeline is not longer than the program)
+        timeline = json.loads(Scheduler().get_timeline(process, nret=100))
 
         self.assertEqual(len(timeline["instructions"]), 100)
         self.assertEqual(timeline["critical_path_graph"]["dynamic_instruction_count"], 100)
         self.assertEqual(timeline["instructions"][-1][:2], [49, 1])
+
+    def test_the_timeline_is_not_longer_than_the_program(self):
+        # N = 10 iterations of 2 instructions: 20, though 100 are asked for (static and dynamic dispatch)
+        for dynamic in (False, True):
+            process = load_process()
+            process["forceDynamic"] = dynamic
+            timeline = json.loads(Scheduler().get_timeline(process, nret=100))
+            self.assertEqual(len(timeline["instructions"]), 20, dynamic)
+            self.assertEqual(timeline["instructions"][-1][:2], [9, 1], dynamic)
 
     def test_timeline_serializes_per_cycle_port_and_main_memory_usage(self):
         process = load_process()
