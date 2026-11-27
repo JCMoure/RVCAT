@@ -46,6 +46,7 @@ class Scheduler:
         self.nFillBuffers = 2
         self.nWriteBuffers = 2
         self.rThru = 1
+        self.prefetchDistance = 0
         self.nStoreBuffers = 16
         self.sb_stores  = 0       # stores in the ROB (each one has its entry of the store buffer)
         self.sb_senior  = []      # retired stores not written into the cache yet: [d_idx, address]
@@ -162,6 +163,9 @@ class Scheduler:
                             self.cycles,
                             dynamic_idx,
                         )
+                        # prefetching: the stream of the LOAD goes on D blocks ahead (not the wrong path)
+                        if instr.memory == 1 and not instr.wrong and instr.s_idx < len(_program.instruction_list):
+                            self.cache.prefetch(instr.memAddr, _program.instruction_list[instr.s_idx].byte_stride)
                         if instr.wrong:
                             kind = "reads" if instr.memory == 1 else "writes"
                             self.wp[kind] += 1
@@ -660,6 +664,7 @@ class Scheduler:
         self.nFillBuffers = process.nFillBuffers
         self.nWriteBuffers = process.nWriteBuffers
         self.rThru = process.rThru
+        self.prefetchDistance = process.prefetchDistance
         self.nStoreBuffers = process.nStoreBuffers
         self.sb_stores, self.sb_senior, self.sb_full_cycles, self.sb_snapshots = 0, [], 0, []
         self.sb_width = None
@@ -679,6 +684,7 @@ class Scheduler:
                 fill_buffer_count=self.nFillBuffers,
                 write_buffer_count=self.nWriteBuffers,
                 return_throughput=self.rThru,
+                prefetch_distance=self.prefetchDistance,
             )
         else:
             self.cache = None
@@ -799,6 +805,7 @@ class Scheduler:
         self.nFillBuffers = process.nFillBuffers
         self.nWriteBuffers = process.nWriteBuffers
         self.rThru = process.rThru
+        self.prefetchDistance = process.prefetchDistance
         self.nStoreBuffers = process.nStoreBuffers
         self.sb_stores, self.sb_senior, self.sb_full_cycles, self.sb_snapshots = 0, [], 0, []
         self.sb_width = None
@@ -820,6 +827,7 @@ class Scheduler:
                 fill_buffer_count=self.nFillBuffers,
                 write_buffer_count=self.nWriteBuffers,
                 return_throughput=self.rThru,
+                prefetch_distance=self.prefetchDistance,
             )
         else:
             self.cache = None
@@ -947,6 +955,11 @@ class Scheduler:
         out["MM_Writes"]      = mm_writes
         out["MM_usage_percent"] = 100 * len(mm_busy_cycles) / self.cycles
         out["store_buffer_full_cycles"] = self.sb_full_cycles if self.cache is not None else 0
+        if self.cache is not None and self.cache.PREFETCH_DISTANCE > 0:
+            stats = dict(self.cache.prefetch_stats)
+            stats["unused"] = max(0, stats["issued"] - stats["useful"] - stats["late"])
+            stats["distance"] = self.cache.PREFETCH_DISTANCE
+            out["prefetch"] = stats
 
         out["critical_path"]   = ex.critical_path_statistics_json(
             self.num_instr, _program.instruction_list, critical_path, self.iterations
@@ -1262,6 +1275,11 @@ class Scheduler:
         out["MM_Writes"]      = sum(request["operation"] == "write" for request in mm_requests)
         out["MM_usage_percent"] = 100 * len(mm_busy_cycles) / self.cycles
         out["store_buffer_full_cycles"] = self.sb_full_cycles if self.cache is not None else 0
+        if self.cache is not None and self.cache.PREFETCH_DISTANCE > 0:
+            stats = dict(self.cache.prefetch_stats)
+            stats["unused"] = max(0, stats["issued"] - stats["useful"] - stats["late"])
+            stats["distance"] = self.cache.PREFETCH_DISTANCE
+            out["prefetch"] = stats
         out["branch"]         = self._branch_statistics()
         out["repetitions"]    = self.reps
         out["iterations_per_repetition"] = self.iters_rep

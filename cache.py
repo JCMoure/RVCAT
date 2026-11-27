@@ -5,7 +5,7 @@ class Cache:
 
   def __init__(self, cache_sz, block_sz, MissLatency=10, MissIssueTime=4,
                record_requests=False, fill_buffer_count=2, write_buffer_count=2,
-               return_throughput=1):
+               return_throughput=1, prefetch_distance=0):
     for name, count in (
       ("fill_buffer_count", fill_buffer_count),
       ("write_buffer_count", write_buffer_count),
@@ -22,6 +22,13 @@ class Cache:
     self.FILL_BUFFER_COUNT = fill_buffer_count
     self.WRITE_BUFFER_COUNT = write_buffer_count
     self.RETURN_THROUGHPUT = return_throughput
+    # Prefetching (stream, per LOAD instruction): an access of a LOAD to block B requests block
+    # B + D (B - D for a backward access); 0: no prefetching. A prefetch is admitted after the demand
+    # misses, only if a fill buffer and a line are free (and no demand miss waits): otherwise it is
+    # dropped
+    if isinstance(prefetch_distance, bool) or not isinstance(prefetch_distance, int) or not 0 <= prefetch_distance <= 16:
+      raise ValueError("prefetch_distance must be an integer between 0 and 16.")
+    self.PREFETCH_DISTANCE = prefetch_distance
 
     self.TAGS = np.zeros(cache_sz, dtype=np.uint32)
     self.LRU = np.zeros(cache_sz, dtype=np.uint32)
@@ -29,6 +36,7 @@ class Cache:
     self.MODIFIED = np.zeros(cache_sz, dtype=np.uint32)
     self.LOADING = [False] * cache_sz
     self.READY_CYCLE = [None] * cache_sz
+    self.PREFETCHED = [False] * cache_sz      # a block brought by a prefetch, not used yet
     self.reset()
 
   def reset(self):
@@ -50,6 +58,11 @@ class Cache:
     # (the critical path) the last fill buffer freed: { cycle, block, instruction_index (the
     # instruction whose data freed it; None: nobody waited) }
     self.last_fill_release = None
+    self.prefetch_queue = []
+    # prefetches admitted, used in time (the LOAD hits), late (the LOAD waits for the block on the
+    # way), dropped (no free fill buffer or line); not used = issued - useful - late
+    self.prefetch_stats = {"issued": 0, "useful": 0, "late": 0, "dropped": 0}
+    self.prefetch_dropped = set()           # blocks whose prefetch was dropped (and never issued later)
 
     for line in range(self.CACHE_SIZE):
       self.LRU[line] = line
@@ -57,6 +70,7 @@ class Cache:
       self.MODIFIED[line] = 0
       self.LOADING[line] = False
       self.READY_CYCLE[line] = None
+      self.PREFETCHED[line] = False
 
   def search(self, block):
     for line in range(self.CACHE_SIZE):
@@ -89,6 +103,7 @@ class Cache:
       "duration": self.MEM_issue_time,
       "mshr_block": entry["block"],
       "instruction_indices": [waiter["instruction_index"] for waiter in entry["waiters"]],
+      "prefetch": bool(entry.get("prefetch")),
     })
 
   def request_access(self, access_type, address, current_cycle, instruction_index):
@@ -103,6 +118,9 @@ class Cache:
     if line >= 0 and not self.LOADING[line]:
       if access_type == 1:
         self.MODIFIED[line] = 1
+      if self.PREFETCHED[line] and access_type == 0:   # a block brought in time by a prefetch
+        self.PREFETCHED[line] = False
+        self.prefetch_stats["useful"] += 1
       self.instruction_requests.pop(instruction_index, None)
       self.updateLRU(line)
       return "hit"
@@ -114,6 +132,8 @@ class Cache:
 
     if block in self.mshrs:
       entry = self.mshrs[block]
+      if entry.get("prefetch") and not entry["waiters"] and access_type == 0:
+        self.prefetch_stats["late"] += 1             # the block of a prefetch, still on the way
       entry["waiters"].append(waiter)
       if "request_record" in entry:
         entry["request_record"]["instruction_indices"].append(instruction_index)
@@ -201,6 +221,40 @@ class Cache:
         self._fill_released(request["block"], instruction_index)
     return True
 
+  def prefetch(self, address, stride_bytes):
+    # A LOAD accessed address: its stream goes on D blocks ahead (in the direction of its stride)
+    if self.PREFETCH_DISTANCE <= 0 or stride_bytes == 0:
+      return
+    block = address // self.BLOCK_SIZE + (self.PREFETCH_DISTANCE if stride_bytes > 0 else -self.PREFETCH_DISTANCE)
+    if block < 0 or self.search(block) >= 0 or self.block_requested(block) or \
+            any(p["block"] == block for p in self.prefetch_queue):
+      return
+    self.prefetch_queue.append({
+      "block": block,
+      "address": block * self.BLOCK_SIZE,
+      "operation": "read",
+      "waiters": [],
+      "prefetch": True,
+    })
+
+  def _admit_prefetches(self, cycle, writebacks):
+    # after the demand misses: only with a free fill buffer and line, and no demand miss waiting
+    queue, self.prefetch_queue = self.prefetch_queue, []
+    for entry in queue:
+      if self.search(entry["block"]) >= 0 or self.block_requested(entry["block"]):
+        continue
+      line = self._line_for_miss() if len(self.fill_buffer_slots) < self.FILL_BUFFER_COUNT and not self.pending_misses else None
+      dirty_victim = line is not None and bool(self.VALID[line] and self.MODIFIED[line])
+      if line is None or (dirty_victim and len(self.write_buffers) >= self.WRITE_BUFFER_COUNT):
+        self.prefetch_dropped.add(entry["block"])
+        self.prefetch_stats["dropped"] = len(self.prefetch_dropped)
+        continue
+      entry["requested_cycle"] = cycle
+      self.prefetch_stats["issued"] += 1
+      self.prefetch_dropped.discard(entry["block"])
+      self.prefetch_stats["dropped"] = len(self.prefetch_dropped)
+      self._admit(entry, line, cycle, writebacks)
+
   def _admit_pending_misses(self, cycle, writebacks):
     while self.pending_misses and len(self.fill_buffer_slots) < self.FILL_BUFFER_COUNT:
       entry = self.pending_misses[0]
@@ -213,6 +267,10 @@ class Cache:
         break
 
       self.pending_misses.pop(0)
+      self._admit(entry, line, cycle, writebacks)
+
+  def _admit(self, entry, line, cycle, writebacks):
+      dirty_victim = bool(self.VALID[line] and self.MODIFIED[line])
       # (the critical path) a miss that waited to be admitted: what let it in, if a fill buffer was
       # freed in this cycle
       if cycle > entry["requested_cycle"]:
@@ -255,6 +313,7 @@ class Cache:
       self.TAGS[line] = entry["block"]
       self.VALID[line] = 1
       self.MODIFIED[line] = 0
+      self.PREFETCHED[line] = False
       self.LOADING[line] = True
       self.READY_CYCLE[line] = None
       self.updateLRU(line)
@@ -326,6 +385,8 @@ class Cache:
       else:                                         # nobody waits: the fill buffer is free
         self.fill_buffer_slots.pop(entry["block"])
         self._fill_released(entry["block"], None)
+        if entry.get("prefetch"):                   # a prefetch: its block waits to be used
+          self.PREFETCHED[line] = True
       self.mshrs.pop(entry["block"])
 
     if cycle != self.last_return_cycle:
@@ -342,6 +403,7 @@ class Cache:
         self.consume_completion(idx)
 
     self._admit_pending_misses(cycle, writebacks)
+    self._admit_prefetches(cycle, writebacks)
 
     if self.mm_queue and cycle >= self.next_mm_issue_cycle:
       request = self.mm_queue.pop(0)
@@ -375,6 +437,8 @@ class Cache:
           "instruction_indices": instruction_indices,
           "duration": int(request["duration"]),
         }
+        if request.get("prefetch"):                 # (only the requests of a prefetch are marked)
+          request_record["prefetch"] = True
         if request["operation"] != "write" and entry.get("admission"):
           request_record["admission"] = entry["admission"]
         self.MEM_requests.append(request_record)
@@ -413,9 +477,14 @@ class Cache:
         "lru": int(self.LRU[line]),
         "ready_cycle": self.READY_CYCLE[line] if self.VALID[line] else None,
         "loading": bool(self.VALID[line] and self.LOADING[line]),
+        "prefetched": bool(self.VALID[line] and (self.PREFETCHED[line] or self._loading_prefetch(line))),
       }
       for line in range(self.CACHE_SIZE)
     ]
+
+  def _loading_prefetch(self, line):
+    # the line receives the block of a prefetch that no LOAD waits for yet
+    return any(e["line"] == line and e.get("prefetch") and not e["waiters"] for e in self.mshrs.values())
 
   def get_buffer_state(self):
     fills = [{"slot": slot, "valid": False} for slot in range(self.FILL_BUFFER_COUNT)]
@@ -441,6 +510,7 @@ class Cache:
         "state": state,
         "ready_cycle": ready_cycle,
         "instruction_indices": instruction_indices,
+        "prefetch": bool(entry is not None and entry.get("prefetch") and not entry["waiters"]),
       }
 
     writes = [{"slot": slot, "valid": False} for slot in range(self.WRITE_BUFFER_COUNT)]

@@ -93,6 +93,7 @@ class Process:
         self.nFillBuffers = 2   # maximum number of concurrent cache-block fills
         self.nWriteBuffers = 2 # maximum number of pending dirty-block writebacks
         self.rThru = 1          # maximum number of LOADs that receive their data from the fill buffers per cycle
+        self.prefetchDistance = 0   # prefetching: a LOAD that accesses block B requests block B + D (0: none)
         self.nStoreBuffers = 16 # entries of the store buffer (stores from dispatch until written into the cache)
         self.bPenalty = 5       # cycles to refill the front-end after a mispredicted branch resolves
         self.speculation = "stall"  # simulation option: "stall" or "wrong-path" after a misprediction
@@ -118,6 +119,10 @@ class Process:
         process.nFillBuffers     = data.get("nFillBuffers", 2)
         process.nWriteBuffers    = data.get("nWriteBuffers", 2)
         process.rThru            = data.get("rThru", 1)
+        process.prefetchDistance = data.get("prefetchDistance", 0)
+        if isinstance(process.prefetchDistance, bool) or not isinstance(process.prefetchDistance, int) or \
+                not 0 <= process.prefetchDistance <= 16:
+            raise ValueError("prefetchDistance must be an integer between 0 and 16.")
         process.nStoreBuffers    = data.get("nStoreBuffers", 16)
         process.bPenalty         = data.get("bPenalty", 5)
         process.speculation      = data.get("speculation", "stall")
@@ -167,6 +172,7 @@ class Process:
             "nWriteBuffers":    self.nWriteBuffers,
             "nStoreBuffers":    self.nStoreBuffers,
             "rThru":            self.rThru,
+            "prefetchDistance": self.prefetchDistance,
             "bPenalty":         self.bPenalty,
             "speculation":      self.speculation,
             "rep":              self.rep,
