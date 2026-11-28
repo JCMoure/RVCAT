@@ -63,6 +63,9 @@ class Cache:
     # way), dropped (no free fill buffer or line); not used = issued - useful - late
     self.prefetch_stats = {"issued": 0, "useful": 0, "late": 0, "dropped": 0}
     self.prefetch_dropped = set()           # blocks whose prefetch was dropped (and never issued later)
+    # software prefetches (PREFETCH instructions): executed, requests sent to MM (issued), and of
+    # those, used in time (useful) and late; not used = issued - useful - late
+    self.sw_prefetch_stats = {"executed": 0, "issued": 0, "useful": 0, "late": 0}
 
     for line in range(self.CACHE_SIZE):
       self.LRU[line] = line
@@ -104,6 +107,7 @@ class Cache:
       "mshr_block": entry["block"],
       "instruction_indices": [waiter["instruction_index"] for waiter in entry["waiters"]],
       "prefetch": bool(entry.get("prefetch")),
+      "prefetch_index": entry.get("prefetch_index"),
     })
 
   def request_access(self, access_type, address, current_cycle, instruction_index):
@@ -114,13 +118,34 @@ class Cache:
     # access_type: 0 load, 1 store that waits for its block and writes it, 2 store of a wrong
     # (speculative) path, 3 store of the store buffer: 2 and 3 request the block for ownership (RFO)
     # but nobody waits for it (they do not use the return throughput) and they do not write it: a
-    # store of the store buffer writes its block later (write_store)
+    # store of the store buffer writes its block later (write_store). 4: a software prefetch
+    # (PREFETCH instruction): if the block is not in the cache nor on the way, it requests it like a
+    # miss, and it is done when its request gets a fill buffer (_admit); nobody waits for the block
+    if access_type == 4:
+      self.sw_prefetch_stats["executed"] += 1
+      if line >= 0 or self.block_requested(block):
+        if line >= 0 and not self.LOADING[line]:
+          self.updateLRU(line)
+        self.instruction_requests.pop(instruction_index, None)
+        return "hit"
+      self.pending_misses.append({
+        "block": block,
+        "address": block_address,
+        "operation": "read",
+        "waiters": [{"instruction_index": instruction_index, "access_type": 4}],
+        "requested_cycle": current_cycle,
+        "prefetch": "sw",
+        "prefetch_index": instruction_index,    # the PREFETCH instruction (for the timeline)
+      })
+      self.instruction_requests[instruction_index] = {"state": "queued", "block": block, "access_type": 4}
+      return "miss"
+
     if line >= 0 and not self.LOADING[line]:
       if access_type == 1:
         self.MODIFIED[line] = 1
       if self.PREFETCHED[line] and access_type == 0:   # a block brought in time by a prefetch
+        self._prefetch_stats(self.PREFETCHED[line])["useful"] += 1
         self.PREFETCHED[line] = False
-        self.prefetch_stats["useful"] += 1
       self.instruction_requests.pop(instruction_index, None)
       self.updateLRU(line)
       return "hit"
@@ -133,7 +158,7 @@ class Cache:
     if block in self.mshrs:
       entry = self.mshrs[block]
       if entry.get("prefetch") and not entry["waiters"] and access_type == 0:
-        self.prefetch_stats["late"] += 1             # the block of a prefetch, still on the way
+        self._prefetch_stats(entry["prefetch"])["late"] += 1   # the block of a prefetch, still on the way
       entry["waiters"].append(waiter)
       if "request_record" in entry:
         entry["request_record"]["instruction_indices"].append(instruction_index)
@@ -146,6 +171,9 @@ class Cache:
 
     for entry in self.pending_misses:
       if entry["block"] == block:
+        if entry.get("prefetch") and access_type == 0 and \
+                not any(w["access_type"] != 4 for w in entry["waiters"]):
+          self._prefetch_stats(entry["prefetch"])["late"] += 1   # a software prefetch still waiting
         entry["waiters"].append(waiter)
         self.instruction_requests[instruction_index] = {
           "state": "queued",
@@ -220,6 +248,10 @@ class Cache:
         self.fill_buffer_slots.pop(request["block"])
         self._fill_released(request["block"], instruction_index)
     return True
+
+  def _prefetch_stats(self, source):
+    # the statistics of a prefetch: "sw" (a PREFETCH instruction) or the hardware prefetcher
+    return self.sw_prefetch_stats if source == "sw" else self.prefetch_stats
 
   def prefetch(self, address, stride_bytes):
     # A LOAD accessed address: its stream goes on D blocks ahead (in the direction of its stride)
@@ -317,6 +349,16 @@ class Cache:
       self.LOADING[line] = True
       self.READY_CYCLE[line] = None
       self.updateLRU(line)
+      if entry.get("prefetch") == "sw":
+        # a software prefetch is done when its request gets a fill buffer: it does not wait for the block
+        self.sw_prefetch_stats["issued"] += 1
+        for waiter in [w for w in entry["waiters"] if w["access_type"] == 4]:
+          entry["waiters"].remove(waiter)
+          request = self.instruction_requests.get(waiter["instruction_index"])
+          if request is not None and request.get("orphan"):     # squashed: nobody consumes it
+            self.instruction_requests.pop(waiter["instruction_index"])
+          elif request is not None:
+            request["state"] = "returned"
       for waiter in entry["waiters"]:
         self.instruction_requests[waiter["instruction_index"]]["state"] = entry["state"]
 
@@ -386,7 +428,7 @@ class Cache:
         self.fill_buffer_slots.pop(entry["block"])
         self._fill_released(entry["block"], None)
         if entry.get("prefetch"):                   # a prefetch: its block waits to be used
-          self.PREFETCHED[line] = True
+          self.PREFETCHED[line] = entry["prefetch"]   # True (hardware) or "sw"
       self.mshrs.pop(entry["block"])
 
     if cycle != self.last_return_cycle:
@@ -439,6 +481,8 @@ class Cache:
         }
         if request.get("prefetch"):                 # (only the requests of a prefetch are marked)
           request_record["prefetch"] = True
+          if request.get("prefetch_index") is not None:   # a PREFETCH instruction
+            request_record["prefetch_index"] = request["prefetch_index"]
         if request["operation"] != "write" and entry.get("admission"):
           request_record["admission"] = entry["admission"]
         self.MEM_requests.append(request_record)

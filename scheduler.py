@@ -4,6 +4,8 @@ from .cache    import Cache
 from .         import exec_graph as ex
 import json
 import random
+
+MEMORY_KIND = {"LOAD": 1, "STORE": 2, "PREFETCH": 3}   # instr.memory (0: not a memory instruction)
 import time
 
 
@@ -116,7 +118,7 @@ class Scheduler:
                         instr.state = InstrState.WRITE_BACK
                         self._wake(instr)
                         instr.substate = InstrState.NONE
-                        if instr.wrong:
+                        if instr.wrong and instr.memory != 3:
                             kind = "reads" if instr.memory == 1 else "writes"
                             self.wp[kind] += 1
                 elif instr.substate in (
@@ -152,7 +154,7 @@ class Scheduler:
                 else:
                     instr.latency -= 1
                     if instr.latency <= 0:
-                        access = instr.memory - 1
+                        access = 4 if instr.memory == 3 else instr.memory - 1   # 4: software prefetch
                         if instr.memory == 2:
                             # the store goes to the store buffer: it only requests its block (RFO);
                             # a wrong-path store never writes it
@@ -166,12 +168,12 @@ class Scheduler:
                         # prefetching: the stream of the LOAD goes on D blocks ahead (not the wrong path)
                         if instr.memory == 1 and not instr.wrong and instr.s_idx < len(_program.instruction_list):
                             self.cache.prefetch(instr.memAddr, _program.instruction_list[instr.s_idx].byte_stride)
-                        if instr.wrong:
+                        if instr.wrong and instr.memory != 3:
                             kind = "reads" if instr.memory == 1 else "writes"
                             self.wp[kind] += 1
                             if result != "hit":
                                 self.wp[kind[:-1] + "_misses"] += 1
-                        if result != "hit":
+                        if result != "hit" and instr.memory != 3:
                             if instr.memory == 1:
                                 ReadMisses.append(dynamic_idx)
                             else:
@@ -242,7 +244,7 @@ class Scheduler:
                                 instr.latency    = latency
                                 instr.exec_lat  += latency
                                 if instr.memory > 0:
-                                    instr.state = InstrState.LOAD if instr.memory == 1 else InstrState.STORE
+                                    instr.state = InstrState.STORE if instr.memory == 2 else InstrState.LOAD
                                 else:
                                     instr.state = InstrState.EXECUTE
                                 instr.substate   = InstrState.NONE
@@ -285,7 +287,7 @@ class Scheduler:
                         port_owner[port] = instr.d_idx
                         instr.exec_cycle = self.cycles
                         if instr.memory > 0:
-                            instr.state = InstrState.LOAD if instr.memory == 1 else InstrState.STORE
+                            instr.state = InstrState.STORE if instr.memory == 2 else InstrState.LOAD
                         else:
                             instr.state = InstrState.EXECUTE
                         instr.exec_lat += instr.latency
@@ -323,7 +325,7 @@ class Scheduler:
         if self.sb_width is None:
             mask = 0
             for instr in _program.instruction_list + _program.epilogue:
-                if instr.type in ("MEM", "VMEM") and instr.oper != "LOAD":
+                if instr.type in ("MEM", "VMEM") and instr.oper == "STORE":
                     mask |= instr.ports
             self.sb_width = max(1, bin(mask).count("1"))
         return self.sb_width
@@ -372,7 +374,7 @@ class Scheduler:
 
     def _sb_full(self, instr):
         # a store needs a free entry of the store buffer to be dispatched
-        if self.cache is None or not (instr.type in ("MEM", "VMEM") and instr.oper != "LOAD"):
+        if self.cache is None or not (instr.type in ("MEM", "VMEM") and instr.oper == "STORE"):
             return False
         return self.sb_stores + len(self.sb_senior) >= self.nStoreBuffers
 
@@ -429,12 +431,14 @@ class Scheduler:
                 self.sb_full_cycles += 1
                 stop = "sb"
                 break
-            if instr.type in ("MEM", "VMEM") and instr.oper != "LOAD" and self.cache is not None:
+            if instr.type in ("MEM", "VMEM") and instr.oper == "STORE" and self.cache is not None:
                 self.sb_stores += 1      # the store takes an entry of the store buffer
             if instr.type == "MEM" or instr.type == "VMEM":
-                instr_mem  = 1 if instr.oper == "LOAD" else 2
+                instr_mem  = MEMORY_KIND.get(instr.oper, 2)
                 addr       = instr.addr
                 instr.addr = addr + instr.byte_stride
+                if instr.access == "search":   # (no repetitions here: the first call)
+                    addr = _program.search_address(instr, self.pc // self.num_instr, 0)
     
             self.window.push(self.cycles, self.pc, static_idx, instr_mem, addr)
             self.pc += 1
@@ -960,6 +964,10 @@ class Scheduler:
             stats["unused"] = max(0, stats["issued"] - stats["useful"] - stats["late"])
             stats["distance"] = self.cache.PREFETCH_DISTANCE
             out["prefetch"] = stats
+        if self.cache is not None and self.cache.sw_prefetch_stats["executed"]:
+            stats = dict(self.cache.sw_prefetch_stats)
+            stats["unused"] = max(0, stats["issued"] - stats["useful"] - stats["late"])
+            out["sw_prefetch"] = stats
 
         out["critical_path"]   = ex.critical_path_statistics_json(
             self.num_instr, _program.instruction_list, critical_path, self.iterations
@@ -1070,13 +1078,16 @@ class Scheduler:
                 break
             mem, addr = 0, -1
             if instr.type == "MEM" or instr.type == "VMEM":
-                mem  = 1 if instr.oper == "LOAD" else 2
+                mem  = MEMORY_KIND.get(instr.oper, 2)
                 if mem == 2 and self.cache is not None:
                     self.sb_stores += 1
                 r, kk = divmod(k, self.iters_rep) if self.reps > 1 else (0, k)   # repetition, and iteration in it
                 if s >= self.num_instr:                 # the block after the call: once per call
                     kk = 0
-                addr = self.addr0[s] + kk * instr.byte_stride + r * self.rep_bytes[s]
+                if instr.access == "search":
+                    addr = _program.search_address(instr, kk, r)
+                else:
+                    addr = self.addr0[s] + kk * instr.byte_stride + r * self.rep_bytes[s]
             d = self.next_d
             self.next_d += 1
             self.window.push(self.cycles, d, s, mem, addr)
@@ -1280,6 +1291,10 @@ class Scheduler:
             stats["unused"] = max(0, stats["issued"] - stats["useful"] - stats["late"])
             stats["distance"] = self.cache.PREFETCH_DISTANCE
             out["prefetch"] = stats
+        if self.cache is not None and self.cache.sw_prefetch_stats["executed"]:
+            stats = dict(self.cache.sw_prefetch_stats)
+            stats["unused"] = max(0, stats["issued"] - stats["useful"] - stats["late"])
+            out["sw_prefetch"] = stats
         out["branch"]         = self._branch_statistics()
         out["repetitions"]    = self.reps
         out["iterations_per_repetition"] = self.iters_rep

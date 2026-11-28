@@ -2,6 +2,8 @@ import json
 
 global _program
 
+MAX_SEARCH_DEPTH = 24   # binary search: at most 2^24 elements (the iterations after the last one probe the key)
+
 def _fraction(value, default):
     # number in [0, 1], or default when missing or invalid
     try:
@@ -32,6 +34,12 @@ class Instruction:
         self.byte_stride = 4 # value initialized when program is loaded
         self.prob     = 0.5  # conditional branch ("if c skip k"): probability of being taken
         self.mispredict = None # conditional branch: misprediction rate (None: 2-bit predictor)
+        # binary search (access "search"): the element probed in each iteration depends on the key
+        # searched in each call; a PREFETCH requests the probe "ahead" iterations later, following
+        # "path" (L: the key is in the lower half, R: in the upper half) in the iterations between
+        self.access   = ""
+        self.ahead    = 0
+        self.path     = ""
 
     def from_json(data: dict):
         instr = Instruction()
@@ -51,6 +59,9 @@ class Instruction:
         instr.byte_stride= data.get("byte_stride", 4)
         instr.prob       = _fraction(data.get("prob"), 0.5)
         instr.mispredict = _fraction(data.get("mispredict"), None)
+        instr.access     = data.get("access", "") or ""
+        instr.ahead      = int(data.get("ahead", 0) or 0)
+        instr.path       = data.get("path", "") or ""
         instr.latency    = data.get("latency", 0)
         instr.ports      = data.get("ports", 0)
         return instr
@@ -74,7 +85,10 @@ class Instruction:
             "addr":     self.addr,
             "byte_stride": self.byte_stride,
             "prob":     self.prob,
-            "mispredict": self.mispredict
+            "mispredict": self.mispredict,
+            "access":   self.access,
+            "ahead":    self.ahead,
+            "path":     self.path
         }
     
 class Process:
@@ -534,6 +548,8 @@ class Program:
         # accesses to an array determin the arrays size
         
         iterations = N // self.loop_stride  # number of loop iterations to execute
+        self.search_depth = max(1, min(iterations, MAX_SEARCH_DEPTH))
+        self.search_keys  = {}
 
         self.array_addrs = []
         init_addr = 0
@@ -548,6 +564,12 @@ class Program:
                         inst.byte_stride = 0
                         inst.addr = init_addr + const*dataSize
                         array_size = max(array_size, (const + inst.lanes)*dataSize)
+                    elif arrayName == inst.source2 and inst.access == "search":
+                        # binary search over the whole array: 2^depth elements, no stride
+                        dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
+                        inst.byte_stride = 0
+                        inst.addr = init_addr
+                        array_size = max(array_size, (1 << self.search_depth) * dataSize)
                     elif (arrayName == inst.source2):
                         const = 0 if inst.constant == "" else int(inst.constant)
                         dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
@@ -572,6 +594,30 @@ class Program:
             array_size += (reps - 1) * rep_bytes   # the data of the other repetitions follow
             self.array_addrs.append([init_addr, dataSize, array_size])
             init_addr += array_size  # assign next array to the next free address after current array
+
+    def search_position(self, r):
+        # the position of the key searched in call r (the same in every simulation)
+        if r not in self.search_keys:
+            import random
+            self.search_keys[r] = random.Random(97 + 7919 * r).randrange(1 << self.search_depth)
+        return self.search_keys[r]
+
+    def search_address(self, inst, k, r):
+        # Address accessed in iteration k of call r by an instruction with access "search": a branchless
+        # binary search over 2^d elements. In iteration k, base keeps the high k bits of the position of
+        # the key, and the LOAD probes base + half (half = 2^(d-1-k)). A PREFETCH requests the probe of
+        # iteration k + ahead if the comparisons of iterations k ... k + ahead - 1 follow its path.
+        d = self.search_depth
+        dataSize = 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
+        def half(j):
+            return (1 << (d - 1 - j)) if j < d else 0
+        pos  = self.search_position(r)
+        base = (pos >> (d - k)) << (d - k) if k < d else pos
+        for j, step in enumerate(inst.path[:inst.ahead]):
+            if step == "R":
+                base += half(k + j)
+        elem = min(base + half(k + inst.ahead), (1 << d) - 1)
+        return inst.addr + elem * dataSize
 
     def get_memory_trace(self, programJSON, N: int, K: int = 4) -> str:
         # Memory addresses accessed by the program during the first K and the last K loop
@@ -625,7 +671,10 @@ class Program:
         exec_probs = prog.execution_probabilities() if prog.conditional_branches() else [1.0] * prog.n
         for index, inst in enumerate(prog.instruction_list):
             if is_access(inst):
-                addrs = [inst.addr + row["k"] * inst.byte_stride + row["rep"] * inst.rep_byte_stride for row in rows]
+                if inst.access == "search":
+                    addrs = [prog.search_address(inst, row["k"], row["rep"]) for row in rows]
+                else:
+                    addrs = [inst.addr + row["k"] * inst.byte_stride + row["rep"] * inst.rep_byte_stride for row in rows]
                 accesses.append(access(index, inst, addrs, exec_probs[index]))
         epilogue = [access(prog.n + j, inst, [inst.addr + r * inst.rep_byte_stride for r in calls])
                     for j, inst in enumerate(prog.epilogue) if is_access(inst)]
