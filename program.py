@@ -619,6 +619,125 @@ class Program:
         elem = min(base + half(k + inst.ahead), (1 << d) - 1)
         return inst.addr + elem * dataSize
 
+    def get_cache_trace(self, programJSON, N: int, nBlocks: int, blkSize: int, max_steps: int = 4096) -> str:
+        # The accesses of the program to the cache in a sequential execution, without time: the LOADs
+        # and STOREs in program order (call, iteration, instruction; the block after each call once
+        # per call), with the addresses of the simulator and the same outcomes of the conditional
+        # branches. The other instructions and the PREFETCHes are ignored. The cache has nBlocks lines
+        # of blkSize bytes, fully associative with LRU replacement; a STORE that misses brings its
+        # block (write-allocate) and makes it dirty. Each access touches one block or more (a vector
+        # access that crosses a block boundary: one step per block).
+        #   arrays:   [{name, base, elem_size, bytes}]
+        #   steps:    [{rep, k, index, oper, array, elem, addr, block, result, line, victim, dirty}]
+        #             result: "hit" | "cold" (first use of the block) | "capacity" (it was evicted)
+        #             victim: block address evicted (None: a free line); dirty: the victim is written back
+        #   totals:   {accesses, hit, cold, capacity, writebacks, per_instruction: {index: {...}}}
+        #   truncated: steps beyond max_steps are counted in totals but not listed
+        import random
+        prog = Program()
+        prog.instruction_list = [Instruction.from_json(d) for d in programJSON.get("instruction_list", [])]
+        prog.n = len(prog.instruction_list)
+        prog.collect_arrays()
+        prog.load_epilogue(programJSON.get("epilogue", []))
+        reps        = max(1, int(programJSON.get("rep", 1) or 1))
+        rep_strides = {a: int(v) for a, v in (programJSON.get("repStrides") or {}).items()}
+        S = prog.loop_stride
+        N = max(S, N - N % S)
+        prog.assign_memory_addresses(N, reps, rep_strides)
+        iterations = N // S
+        nBlocks, blkSize = int(nBlocks), int(blkSize)
+        if nBlocks < 1 or blkSize < 1:
+            raise ValueError("The processor has no cache (Blocks = 0).")
+        if reps * iterations * (prog.n + len(prog.epilogue)) > 2_000_000:
+            raise ValueError("Too many accesses for the cache trace: reduce N or Rep.")
+
+        skips = dict(prog.conditional_branches())
+        rngs  = {b: random.Random(1000 + 7919 * b) for b in skips}    # the outcomes of the simulator
+        outcomes = {b: [] for b in skips}
+
+        def taken(b, k):
+            seq = outcomes[b]
+            while len(seq) <= k:
+                seq.append(rngs[b].random() < prog.instruction_list[b].prob)
+            return seq[k]
+
+        def size_of(inst):
+            return 4 if inst.size == "word" else (8 if inst.size == "long" else 1)
+
+        lines   = [None] * nBlocks        # block number in each line
+        dirty   = [False] * nBlocks
+        last    = [-1] * nBlocks          # step of the last use (LRU)
+        where   = {}                      # block -> line
+        seen    = set()
+        steps   = []
+        totals  = {"accesses": 0, "hit": 0, "cold": 0, "capacity": 0, "writebacks": 0, "per_instruction": {}}
+        bases   = {name: base for name, (base, _, _) in zip(prog.arrays, prog.array_addrs)}
+        count   = [0]
+
+        def access(r, k, index, inst, addr):
+            first = addr // blkSize
+            last_block = (addr + size_of(inst) * max(1, inst.lanes) - 1) // blkSize
+            for block in range(first, last_block + 1):
+                n = count[0]
+                count[0] += 1
+                victim, wb = None, False
+                if block in where:
+                    line, result = where[block], "hit"
+                else:
+                    result = "capacity" if block in seen else "cold"
+                    seen.add(block)
+                    free = [i for i in range(nBlocks) if lines[i] is None]
+                    line = free[0] if free else min(range(nBlocks), key=lambda i: last[i])
+                    if lines[line] is not None:
+                        victim, wb = lines[line] * blkSize, dirty[line]
+                        del where[lines[line]]
+                        if wb:
+                            totals["writebacks"] += 1
+                    lines[line], dirty[line] = block, False
+                    where[block] = line
+                last[line] = n
+                if inst.oper == "STORE":
+                    dirty[line] = True
+                totals["accesses"] += 1
+                totals[result] += 1
+                per = totals["per_instruction"].setdefault(str(index), {"accesses": 0, "hit": 0, "cold": 0, "capacity": 0})
+                per["accesses"] += 1
+                per[result] += 1
+                if n < max_steps:
+                    steps.append({"rep": r, "k": k, "index": index, "oper": inst.oper, "array": inst.source2,
+                                  "elem": (addr - bases.get(inst.source2, 0)) // size_of(inst),
+                                  "addr": int(addr), "block": int(block * blkSize), "result": result,
+                                  "line": line, "victim": None if victim is None else int(victim), "dirty": wb})
+
+        def is_access(inst):
+            return inst.type in ("MEM", "VMEM") and inst.oper in ("LOAD", "STORE") and inst.source2 in prog.arrays
+
+        for r in range(reps):
+            for k in range(iterations):
+                g = r * iterations + k                  # (the outcomes go on across the calls)
+                s = 0
+                while s < prog.n:
+                    inst = prog.instruction_list[s]
+                    if is_access(inst):
+                        if inst.access == "search":
+                            addr = prog.search_address(inst, k, r)
+                        else:
+                            addr = inst.addr + k * inst.byte_stride + r * inst.rep_byte_stride
+                        access(r, k, s, inst, addr)
+                    if s in skips and taken(s, g):
+                        s += 1 + skips[s]
+                    else:
+                        s += 1
+            for j, inst in enumerate(prog.epilogue):    # the block after the call
+                if is_access(inst):
+                    access(r, iterations - 1, prog.n + j, inst, inst.addr + r * inst.rep_byte_stride)
+
+        arrays = [{"name": name, "base": base, "elem_size": size, "bytes": total}
+                  for name, (base, size, total) in zip(prog.arrays, prog.array_addrs)]
+        return json.dumps({"N": N, "S": S, "iterations": iterations, "rep": reps, "nBlocks": nBlocks,
+                           "blkSize": blkSize, "arrays": arrays, "steps": steps, "totals": totals,
+                           "truncated": count[0] > max_steps, "repStrides": rep_strides})
+
     def get_memory_trace(self, programJSON, N: int, K: int = 4) -> str:
         # Memory addresses accessed by the program during the first K and the last K loop
         # iterations, with the same model used by the simulator (assign_memory_addresses and
